@@ -6,6 +6,7 @@ namespace DesctopNewYear;
 internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
 {
     public const int MiniatureSlots = 4;
+    public const int PondTreeCount = 4;
     public float Scale => Math.Clamp(Math.Min(View.Width / 1440f, View.Height / 900f), .46f, 1.65f);
     public PointF Anchor => new(View.Width - 64 * Scale,
         Math.Min(View.Height - 103 * Scale, Work.Bottom - View.Y - 57 * Scale));
@@ -22,6 +23,17 @@ internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
     public PointF Roof => Screen(-134, -202);
     public PointF Lantern => Screen(-465, -106);
     public PointF Branch => Screen(-393, -112);
+    public PointF PondTree(int index)
+    {
+        var (x, y) = index switch
+        {
+            0 => (.048f, .849f),
+            1 => (.109f, .809f),
+            2 => (.423f, .746f),
+            _ => (.49f, .773f)
+        };
+        return new(View.Left + View.Width * x, View.Top + View.Height * y);
+    }
     public Rectangle SnowArea => new(Point.Empty, View.Size);
     public Rectangle DriftArea => Rectangle.FromLTRB(0, (int)MathF.Floor(Anchor.Y - 146 * Scale),
         View.Width, (int)MathF.Ceiling(Anchor.Y + 70 * Scale));
@@ -56,7 +68,8 @@ internal static class YardArt
     public static PointF OrnamentPosition(YardLayout layout, int index) =>
         layout.Screen(-393 + Branches[index].X, Branches[index].Y);
 
-    public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int missing = -1)
+    public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int missing = -1,
+        int pondOrnaments = 0, int lanternFrost = 0)
     {
         var bitmap = new Bitmap(layout.View.Width, layout.View.Height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(bitmap);
@@ -74,11 +87,11 @@ internal static class YardArt
         DrawMountains(graphics, w, h, dark);
         DrawForest(graphics, w, h, layout.Scale, dark);
         DrawGround(graphics, w, h, dark);
-        DrawMeadow(graphics, layout, dark);
+        DrawMeadow(graphics, layout, dark, pondOrnaments);
 
         graphics.TranslateTransform(layout.Anchor.X, layout.Anchor.Y);
         graphics.ScaleTransform(layout.Scale, layout.Scale);
-        DrawYard(graphics, light, ornaments, dark, missing);
+        DrawYard(graphics, light, ornaments, dark, missing, lanternFrost);
         return bitmap;
     }
 
@@ -180,7 +193,7 @@ internal static class YardArt
         g.DrawBezier(drift, w * .12f, h * .96f, w * .23f, h * .90f, w * .33f, h * .99f, w * .37f, h * .95f);
     }
 
-    private static void DrawMeadow(Graphics g, YardLayout layout, float dark)
+    private static void DrawMeadow(Graphics g, YardLayout layout, float dark, int ornaments)
     {
         var scale = layout.Scale;
         var w = layout.View.Width;
@@ -229,30 +242,18 @@ internal static class YardArt
         g.Restore(clip);
 
         // A few landmarks carry the winter scene across the monitor.
-        DrawMeadowSpruce(g, w * .048f, h * .849f, 155 * scale, 48 * scale, dark);
-        DrawMeadowSpruce(g, w * .093f, h * .809f, 107 * scale, 33 * scale, dark);
-        DrawMeadowSpruce(g, w * .43f, h * .746f, 96 * scale, 31 * scale, dark);
-        DrawMeadowSpruce(g, w * .46f, h * .773f, 130 * scale, 40 * scale, dark);
-        DrawBench(g, layout.PondBench, scale, iceEdge, dark);
-    }
-
-    private static void DrawMeadowSpruce(Graphics g, float x, float y, float height, float half, float dark)
-    {
-        var needles = Mix(C("#547c7e"), C("#304b60"), dark);
-        var powder = Mix(C("#eaf3f0"), C("#94acc2"), dark);
-        Ellipse(g, Color.FromArgb(62, C("#38566d")), x - half * 1.11f, y - height * .045f,
-            half * 2.22f, height * .11f);
-        using (var fill = new SolidBrush(needles))
-            Fir(g, fill, x, y, height, half);
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < YardLayout.PondTreeCount; i++)
         {
-            var level = y - height * (1 - i * .22f);
-            var edge = half * (.44f + i * .17f);
-            Poly(g, powder, new(x, level), new(x - edge, level + height * .36f),
-                new(x - edge * .22f, level + height * .27f),
-                new(x + edge * .42f, level + height * .30f),
-                new(x + edge * .84f, level + height * .32f));
+            var position = layout.PondTree(i);
+            var treeScale = scale * (i switch { 0 => .80f, 1 => .56f, 2 => .50f, _ => .67f });
+            var placed = (ornaments + YardLayout.PondTreeCount - 1 - i) / YardLayout.PondTreeCount;
+            var state = g.Save();
+            g.TranslateTransform(position.X - layout.View.X, position.Y - layout.View.Y);
+            g.ScaleTransform(treeScale, treeScale);
+            DrawTree(g, 0, 0, placed, iceEdge, dark, -1, i);
+            g.Restore(state);
         }
+        DrawBench(g, layout.PondBench, scale, iceEdge, dark);
     }
 
     private static void DrawBench(Graphics g, PointF position, float scale, Color snow, float dark)
@@ -271,7 +272,7 @@ internal static class YardArt
         g.Restore(state);
     }
 
-    private static void DrawYard(Graphics g, Daylight light, int ornaments, float dark, int missing)
+    private static void DrawYard(Graphics g, Daylight light, int ornaments, float dark, int missing, int frost)
     {
         var snowColor = Mix(C("#f7fcf8"), C("#bdd3e2"), dark);
         Ellipse(g, Color.FromArgb(64, C("#294362")), -552, -15, 575, 55);
@@ -284,13 +285,13 @@ internal static class YardArt
 
         if (light.LanternLit)
         {
-            Glow(g, new(-465, -78), 94, C("#ffd68d"), 72);
-            Ellipse(g, Color.FromArgb(49, C("#ffdc9a")), -523, 1, 114, 26);
+            Glow(g, new(-465, -78), 94, C("#ffd68d"), 81 - 15 * frost);
+            Ellipse(g, Color.FromArgb(55 - 9 * frost, C("#ffdc9a")), -523, 1, 114, 26);
         }
 
         DrawHouse(g, snowColor, light.WindowLit, dark);
         DrawTree(g, -393, 0, ornaments, snowColor, dark, missing);
-        DrawLantern(g, light.LanternLit, snowColor);
+        DrawLantern(g, light.LanternLit, snowColor, frost);
     }
 
     private static void DrawHouse(Graphics g, Color snow, bool lit, float dark)
@@ -335,7 +336,8 @@ internal static class YardArt
         Rect(g, snow, -211, -41, 72, 5);
     }
 
-    private static void DrawTree(Graphics g, float x, float y, int count, Color snow, float dark, int missing)
+    private static void DrawTree(Graphics g, float x, float y, int count, Color snow, float dark, int missing,
+        int pondTree = -1)
     {
         Rect(g, C("#685358"), x - 7, y - 25, 14, 29);
         var green = Mix(C("#447775"), C("#294b57"), dark);
@@ -367,7 +369,8 @@ internal static class YardArt
         for (var i = 0; i < Math.Min(count, Branches.Length); i++)
         {
             if (i != missing)
-                Ornament(g, new(x + Branches[i].X, y + Branches[i].Y), i, 1.05f);
+                Ornament(g, new(x + Branches[i].X, y + Branches[i].Y),
+                    pondTree < 0 ? i : PondOrnament(pondTree, i), 1.05f);
         }
         if (count == 7)
         {
@@ -376,7 +379,9 @@ internal static class YardArt
         }
     }
 
-    private static void DrawLantern(Graphics g, bool lit, Color snow)
+    public static int PondOrnament(int tree, int ordinal) => (tree + 2 * ordinal) % 6;
+
+    private static void DrawLantern(Graphics g, bool lit, Color snow, int frost)
     {
         var metal = C("#353e50");
         Line(g, metal, 5, -465, -91, -465, 9);
@@ -385,6 +390,9 @@ internal static class YardArt
         Poly(g, metal, new(-477, -106), new(-453, -106), new(-457, -84), new(-473, -84));
         Poly(g, lit ? C("#ffdf94") : C("#879baa"), new(-473, -103), new(-457, -103), new(-460, -89), new(-470, -89));
         Line(g, metal, 1.5f, -465, -103, -465, -88);
+        if (frost > 0)
+            Poly(g, Color.FromArgb(75 + frost * 44, snow), new(-473, -103), new(-457, -103),
+                new(-459, -95 + frost), new(-465, -97 + frost), new(-472, -94 + frost));
         Poly(g, snow, new(-481, -106), new(-465, -120), new(-449, -106));
     }
 
@@ -473,11 +481,16 @@ internal static class YardArt
             Pose.React or Pose.Hang => -88,
             Pose.Throw => -74,
             Pose.PickUp => -7,
+            Pose.Wipe => -96 + 6 * MathF.Sin(actor.Time * 12),
             _ => -51 + step * 6
         };
-        var reach = actor.Pose is Pose.Throw or Pose.PickUp ? 43 : 31;
+        var reach = actor.Pose == Pose.Wipe ? 25 + 5 * MathF.Sin(actor.Time * 7) :
+            actor.Pose is Pose.Throw or Pose.PickUp ? 43 : 31;
         Line(g, twig, 3.5f, 15, -53, reach, arm);
         Line(g, twig, 2, reach - 2, arm + 2, reach + 5, arm - 4);
+        if (actor.Pose == Pose.Wipe)
+            Poly(g, C("#a7ddd9"), new(reach - 4, arm - 4), new(reach + 5, arm - 7),
+                new(reach + 8, arm + 3), new(reach - 1, arm + 6));
 
         Ellipse(g, ice, -20, -105, 41, 37);
         Ellipse(g, white, -20, -106, 37, 35);

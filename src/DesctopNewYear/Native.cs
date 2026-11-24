@@ -130,6 +130,10 @@ internal static class Native
     [DllImport("user32.dll")]
     private static extern bool IsZoomed(nint window);
     [DllImport("user32.dll")]
+    private static extern nint GetAncestor(nint window, uint flags);
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(NativePoint point);
+    [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")]
     internal static extern bool GetWindowRect(nint window, out NativeRect rectangle);
@@ -139,28 +143,33 @@ internal static class Native
     private static extern int GetClassName(nint window, StringBuilder name, int max);
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(nint window, int attribute, out NativeRect rectangle, int size);
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    private static extern int ReadWindowAttribute(nint window, int attribute, out int value, int size);
 
     internal static nint ForegroundApp()
     {
         var window = GetForegroundWindow();
+        return IsAppWindow(window) ? window : 0;
+    }
+
+    private static bool IsAppWindow(nint window)
+    {
         if (window == 0)
-            return 0;
+            return false;
 
         GetWindowThreadProcessId(window, out var process);
-        if (process == Environment.ProcessId)
-            return 0;
+        if (process == Environment.ProcessId || (GetWindowLong(window, -20) & ToolWindow) != 0)
+            return false;
 
         var name = new StringBuilder(96);
         GetClassName(window, name, name.Capacity);
-        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
-            return 0;
-
-        return window;
+        return name.ToString() is not ("Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "#32768");
     }
 
     internal static Rectangle FrameBounds(nint window)
     {
-        if (window == 0 || !IsWindowVisible(window) || IsIconic(window))
+        if (window == 0 || !IsWindowVisible(window) || IsIconic(window) ||
+            (ReadWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0))
             return Rectangle.Empty;
         if (DwmGetWindowAttribute(window, 9, out var bounds, Marshal.SizeOf<NativeRect>()) == 0 ||
             GetWindowRect(window, out bounds))
@@ -171,21 +180,47 @@ internal static class Native
 
     internal static WindowPerch? FindPerch(nint window, Rectangle bounds, YardLayout layout)
     {
-        if (window == 0 || bounds.IsEmpty || IsZoomed(window) || IsFullscreen(bounds, layout.View))
+        if (window == 0 || bounds.IsEmpty || IsFullscreen(window, bounds, layout.View))
             return null;
 
         var usable = Rectangle.Intersect(bounds, layout.Work);
         var scale = layout.Scale;
-        if (usable.Width < 155 * scale || bounds.Height < 115 * scale ||
-            bounds.Top < layout.Work.Top + 81 * scale || bounds.Top > layout.Work.Bottom - 95 * scale)
+        if (usable.Width < 112 * scale || usable.Height < 88 * scale ||
+            bounds.Top < layout.Work.Top - 16 * scale)
             return null;
 
-        return new(window, bounds, new(usable.Left + usable.Width * .55f, bounds.Top + 2 * scale));
+        var x = Math.Clamp(usable.Left + usable.Width * .55f, layout.Work.Left + 49 * scale,
+            layout.Work.Right - 49 * scale);
+        var y = Math.Max(bounds.Top + 2 * scale, layout.Work.Top + 76 * scale);
+        if (y + 6 >= usable.Bottom)
+            return null;
+        var topEdge = new NativePoint((int)x, (int)Math.Max(y + 5, usable.Top + 2));
+        var surface = WindowFromPoint(topEdge);
+        if (surface != window && GetAncestor(surface, 2) != window)
+            return null;
+        return new(window, bounds, new(x, y));
     }
 
-    internal static bool IsFullscreen(Rectangle window, Rectangle monitor) =>
-        !window.IsEmpty && window.Left <= monitor.Left + 2 && window.Top <= monitor.Top + 2 &&
-        window.Right >= monitor.Right - 2 && window.Bottom >= monitor.Bottom - 2;
+    internal static WindowPerch? FindAvailablePerch(nint foreground, YardLayout layout)
+    {
+        var preferred = FindPerch(foreground, FrameBounds(foreground), layout);
+        if (preferred.HasValue)
+            return preferred;
+
+        WindowPerch? available = null;
+        EnumWindows((window, _) =>
+        {
+            if (window != foreground && IsAppWindow(window))
+                available = FindPerch(window, FrameBounds(window), layout);
+            return !available.HasValue;
+        }, 0);
+        return available;
+    }
+
+    internal static bool IsFullscreen(nint window, Rectangle bounds, Rectangle monitor) =>
+        !bounds.IsEmpty && bounds.Left <= monitor.Left + 2 && bounds.Top <= monitor.Top + 2 &&
+        bounds.Right >= monitor.Right - 2 && bounds.Bottom >= monitor.Bottom - 2 &&
+        (!IsZoomed(window) || (GetWindowLong(window, -16) & 0x00c00000) == 0);
 
     internal static void AttachChild(nint window, nint parent)
     {

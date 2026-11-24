@@ -20,7 +20,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private PrankFrame prank;
     private SnowCover groundSnow;
     private Miniature[] miniatures = [];
-    private (Daylight Light, int Ornaments, int Missing)? painted;
+    private (Daylight Light, int Ornaments, int Missing, int PondOrnaments, int Frost)? painted;
 
     public bool Available => Handle != 0 && Native.IsWindow(Handle) && host.Available;
     public nint IconHost => host.IconHost;
@@ -74,11 +74,12 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     public void Draw(Daylight daylight, YardSettings settings, ActorFrame? backSnowman, ActorFrame? backOwl,
         bool showWeather)
     {
-        var key = (daylight, settings.Ornaments, scene.StolenOrnament);
+        var key = (daylight, settings.Ornaments, scene.StolenOrnament, settings.PondOrnaments, scene.LanternFrost);
         var dirty = Rectangle.Empty;
         if (painted != key)
         {
-            var next = YardArt.Landscape(layout, daylight, settings.Ornaments, scene.StolenOrnament);
+            var next = YardArt.Landscape(layout, daylight, settings.Ornaments, scene.StolenOrnament,
+                settings.PondOrnaments, scene.LanternFrost);
             landscape?.Dispose();
             landscape = next;
             painted = key;

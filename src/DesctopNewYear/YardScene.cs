@@ -1,6 +1,6 @@
 namespace DesctopNewYear;
 
-internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp, RollableSnow }
+internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp, RollableSnow, Wipe }
 
 internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int Direction, int Toy, float Time,
     bool NoHat = false, bool HoldingHat = false, bool Plowing = false, bool RecoveredToy = false, float Snowball = 0)
@@ -64,6 +64,7 @@ internal sealed class YardScene
     private OwlAction owlAction;
     private PointF snowman, owl, owlStart, owlTarget;
     private int direction = -1, owlLook, held = -1, stolen = -1;
+    private int decorationTree = -1;
     private double time;
     private float snowmanTime, owlTime, owlFlight, snowmanReaction, owlReaction;
     private double nextToy = 8, nextWalk = 5, nextOwl = 12, nextSnow = 16, nextSmoke = 8, nextHatTheft = 55;
@@ -75,7 +76,7 @@ internal sealed class YardScene
     private float toyFall;
     private PointF toyFallOrigin, toyLanding;
     private bool askedForPerch, visibleDeparture;
-    private double nextWindowVisit;
+    private double nextWindowVisit = 24;
     private bool hatMissing, owlHasHat;
     private bool hatGrabbed, hatDragged;
     private SnowmanAction afterHat = SnowmanAction.Return;
@@ -110,6 +111,12 @@ internal sealed class YardScene
     public bool Smoking => smoke > 0;
     public bool PowderFalling => powder > 0;
     public int StolenOrnament => stolen >= 0 ? stolen : settings.MissingOrnament;
+    public int LanternFrost { get; private set; } = 1;
+    private PointF DecorationSpot => decorationTree < 0 ? Layout.Tree :
+        Layout.PondTree(decorationTree) with
+        {
+            X = Layout.PondTree(decorationTree).X + 34 * Layout.Scale
+        };
     public WindowPerch? CurrentPerch { get; private set; }
     public bool OwlOverWindows => !owlAway &&
         (CurrentPerch is { } perch && Distance(owl, perch.Feet) < 153 * Layout.Scale ||
@@ -152,7 +159,7 @@ internal sealed class YardScene
         snowman = snowmanAction is SnowmanAction.Away or SnowmanAction.Carry or
             SnowmanAction.TractorAway or SnowmanAction.Plow ? Offscreen : layout.Home;
         if (snowmanAction == SnowmanAction.Hang)
-            snowman = layout.Tree;
+            snowman = DecorationSpot;
         if (snowmanAction == SnowmanAction.Clean)
             snowman = layout.Path;
         if (snowmanAction == SnowmanAction.ParkTractor)
@@ -201,15 +208,16 @@ internal sealed class YardScene
                 _ when snowmanReaction > 0 => Pose.React,
                 SnowmanAction.Clean => powder > .5f ? Pose.Rest : Pose.Shovel,
                 SnowmanAction.Hang => Pose.Hang,
+                SnowmanAction.Inspect when chore == Chore.Lantern => Pose.Wipe,
                 SnowmanAction.Inspect => chore == Chore.Walk ? Pose.Rest : Pose.React,
                 SnowmanAction.Rest => Pose.Rest,
                 _ => Pose.Walk
             };
             return new(snowman, false, pose, direction, held,
-                pose is Pose.Walk or Pose.Shovel or Pose.Tractor ? AnimationTime : 0,
+                pose is Pose.Walk or Pose.Shovel or Pose.Tractor or Pose.Wipe ? AnimationTime : 0,
                 NoHat: hatMissing, Plowing: snowmanAction == SnowmanAction.Plow &&
                     (plowDepth > 0 || settings.Miniatures.Any(figure => figure.Snowfalls >= Miniature.BurialLimit)),
-                RecoveredToy: returningToy,
+                RecoveredToy: returningToy || decorationTree >= 0,
                 Snowball: snowmanAction is SnowmanAction.CarryHead or SnowmanAction.StackHead ? MiniHeadRadius : 0);
         }
     }
@@ -256,7 +264,7 @@ internal sealed class YardScene
 
         visibleDeparture = showDeparture && OwlOverWindows;
         CurrentPerch = null;
-        nextWindowVisit = time + 20;
+        nextWindowVisit = time + 32;
         FlyTo(Layout.Roof, OwlAction.LeaveWindow);
     }
 
@@ -522,6 +530,7 @@ internal sealed class YardScene
                 if (snowmanAction != SnowmanAction.Plow)
                 {
                     settings.Snow = Math.Min(3, settings.Snow + 1);
+                    LanternFrost = Math.Min(3, LanternFrost + 1);
                     if (settings.Miniatures.Any(figure => figure.HasHat && figure.Snowfalls < Miniature.BurialLimit))
                         settings.Miniatures = settings.Miniatures.Select(figure =>
                             figure.HasHat && figure.Snowfalls < Miniature.BurialLimit
@@ -583,21 +592,25 @@ internal sealed class YardScene
             case SnowmanAction.WalkAround when WalkTo(strollStop, seconds):
                 if (chore == Chore.Tree)
                     powder = .95f;
+                if (chore == Chore.Lantern)
+                    direction = 1;
                 SetSnowman(SnowmanAction.Inspect);
                 break;
-            case SnowmanAction.Inspect when snowmanTime >= 1.7f:
+            case SnowmanAction.Inspect when chore == Chore.Lantern && snowmanTime >= 2.4f:
+                LanternFrost = 0;
+                SetSnowman(SnowmanAction.Return);
+                break;
+            case SnowmanAction.Inspect when chore != Chore.Lantern && snowmanTime >= 1.7f:
                 SetSnowman(SnowmanAction.Return);
                 break;
             case SnowmanAction.Leave when WalkTo(Offscreen, seconds):
                 SetSnowman(SnowmanAction.Away);
                 break;
             case SnowmanAction.Away when snowmanTime >= 4.6f:
-                returningToy = settings.MissingOrnament >= 0;
-                held = returningToy ? settings.MissingOrnament :
-                    settings.Ornaments < 7 ? settings.Ornaments : random.Next(0, 6);
+                ChooseDecoration();
                 SetSnowman(SnowmanAction.Carry);
                 break;
-            case SnowmanAction.Carry when WalkTo(Layout.Tree, seconds, 132):
+            case SnowmanAction.Carry when WalkTo(DecorationSpot, seconds, 132):
                 direction = -1;
                 SetSnowman(SnowmanAction.Hang);
                 break;
@@ -609,9 +622,12 @@ internal sealed class YardScene
                     returningToy = false;
                     nextToyTheft = time + random.Next(24, 39);
                 }
+                else if (decorationTree >= 0)
+                    settings.PondOrnaments++;
                 else
                     settings.Ornaments = Math.Min(7, settings.Ornaments + 1);
                 held = -1;
+                decorationTree = -1;
                 nextToy = time + (late ? random.Next(48, 75) : random.Next(30, 50));
                 nextWalk = Math.Max(nextWalk, time + 8);
                 SetSnowman(SnowmanAction.Return);
@@ -655,6 +671,7 @@ internal sealed class YardScene
             case SnowmanAction.PickToy when snowmanTime >= .48f:
                 held = stolen;
                 returningToy = true;
+                decorationTree = -1;
                 SetSnowman(SnowmanAction.Carry);
                 break;
             case SnowmanAction.ShapeBase when snowmanTime >= 1.2f:
@@ -682,6 +699,26 @@ internal sealed class YardScene
         }
     }
 
+    private void ChooseDecoration()
+    {
+        returningToy = settings.MissingOrnament >= 0;
+        decorationTree = -1;
+        if (returningToy)
+        {
+            held = settings.MissingOrnament;
+            return;
+        }
+
+        var pondRound = settings.PondOrnaments / YardLayout.PondTreeCount;
+        if (pondRound < 3 && (settings.Ornaments == 7 || settings.Ornaments > pondRound + 1))
+        {
+            decorationTree = settings.PondOrnaments % YardLayout.PondTreeCount;
+            held = YardArt.PondOrnament(decorationTree, pondRound);
+        }
+        else
+            held = settings.Ornaments < 7 ? settings.Ornaments : random.Next(0, 6);
+    }
+
     private void ShapeSnowball()
     {
         askedForMini = false;
@@ -696,8 +733,8 @@ internal sealed class YardScene
         SetSnowman(SnowmanAction.ShapeBase);
     }
 
-    private bool SnowmanFree => snowmanAction is SnowmanAction.Rest or SnowmanAction.Return or
-        SnowmanAction.WalkAround or SnowmanAction.Inspect;
+    private bool SnowmanFree => snowmanAction is SnowmanAction.Rest or SnowmanAction.Return or SnowmanAction.WalkAround ||
+        snowmanAction == SnowmanAction.Inspect && chore != Chore.Lantern;
 
     private void BeginWalk(bool late)
     {
@@ -904,6 +941,11 @@ internal sealed class YardScene
             return;
         }
         var canVisit = !hatMissing && stolen < 0 && window.HasValue;
+        if (canVisit && askedForPerch && window is { } requested)
+        {
+            LandOnWindow(requested);
+            return;
+        }
         var canStealToy = canStealHat && settings.Ornaments > 0 && settings.MissingOrnament < 0;
         if (canStealToy && (askedForToyTheft || time >= nextToyTheft))
         {
@@ -913,16 +955,11 @@ internal sealed class YardScene
             FlyTo(new(branch.X - 8 * Layout.Scale, branch.Y + 29 * Layout.Scale), OwlAction.Steal);
             return;
         }
-        if (time < nextOwl && !(askedForPerch && canVisit))
+        if (time < nextOwl)
             return;
 
-        if (canVisit && window is { } perch && (askedForPerch ||
-            time >= nextWindowVisit && random.Next(4) == 0))
-        {
-            askedForPerch = false;
-            CurrentPerch = perch;
-            FlyTo(perch.Feet, OwlAction.AtWindow);
-        }
+        if (canVisit && window is { } perch && time >= nextWindowVisit)
+            LandOnWindow(perch);
         else if (random.Next(3) == 0)
             FlyTo(LeftEdge, OwlAction.Leave);
         else
@@ -930,6 +967,13 @@ internal sealed class YardScene
             var choices = Perches().Where(point => point != owl).ToArray();
             FlyTo(choices[random.Next(choices.Length)], OwlAction.Roam);
         }
+    }
+
+    private void LandOnWindow(WindowPerch perch)
+    {
+        askedForPerch = false;
+        CurrentPerch = perch;
+        FlyTo(perch.Feet, OwlAction.AtWindow);
     }
 
     private PointF FlightPoint(float elapsed)
@@ -984,7 +1028,7 @@ internal sealed class YardScene
                 FlyTo(Layout.Roof, OwlAction.Roam);
                 break;
             case OwlAction.AtWindow:
-                nextOwl = time + random.Next(4, 8);
+                nextOwl = time + random.Next(8, 13);
                 break;
             case OwlAction.ShakeBranch when snowmanAction == SnowmanAction.Clean:
                 settings.Snow = Math.Min(3, settings.Snow + 1);

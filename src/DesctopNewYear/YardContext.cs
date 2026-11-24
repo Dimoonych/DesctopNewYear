@@ -22,9 +22,9 @@ internal sealed class YardContext : ApplicationContext
     private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
-    private (int Ornaments, int Snow, int MissingOrnament, Miniature[] Miniatures) saved;
-    private (int Ornaments, int Snow, int MissingOrnament, Miniature[] Miniatures) Progress =>
-        (settings.Ornaments, settings.Snow, settings.MissingOrnament, settings.Miniatures);
+    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures) saved;
+    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures) Progress =>
+        (settings.Ornaments, settings.PondOrnaments, settings.Snow, settings.MissingOrnament, settings.Miniatures);
 
     public YardContext()
     {
@@ -170,8 +170,8 @@ internal sealed class YardContext : ApplicationContext
             }
             var foreground = Native.ForegroundApp();
             var bounds = Native.FrameBounds(foreground);
-            fullscreen = Native.IsFullscreen(bounds, layout.View);
-            perchCandidate = Native.FindPerch(foreground, bounds, layout);
+            fullscreen = Native.IsFullscreen(foreground, bounds, layout.View);
+            perchCandidate = fullscreen || settings.WallpaperOnly ? null : Native.FindAvailablePerch(foreground, layout);
             if (fullscreen)
                 scene.DismissWindowPerch(showDeparture: false);
         }
@@ -209,9 +209,6 @@ internal sealed class YardContext : ApplicationContext
             return perchCandidate;
 
         // During a visit, look at the exact target every animation tick so even small moves scare her off.
-        if (Native.GetForegroundWindow() != current.Window)
-            return null;
-
         return Native.FindPerch(current.Window, Native.FrameBounds(current.Window), scene.Layout);
     }
 
