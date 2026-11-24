@@ -180,7 +180,7 @@ internal static class Native
 
     internal static WindowPerch? FindPerch(nint window, Rectangle bounds, YardLayout layout)
     {
-        if (window == 0 || bounds.IsEmpty || IsFullscreen(window, bounds, layout.View))
+        if (window == 0 || bounds.IsEmpty || IsZoomed(window) || CoversArea(bounds, layout.Work))
             return null;
 
         var usable = Rectangle.Intersect(bounds, layout.Work);
@@ -218,9 +218,12 @@ internal static class Native
     }
 
     internal static bool IsFullscreen(nint window, Rectangle bounds, Rectangle monitor) =>
-        !bounds.IsEmpty && bounds.Left <= monitor.Left + 2 && bounds.Top <= monitor.Top + 2 &&
-        bounds.Right >= monitor.Right - 2 && bounds.Bottom >= monitor.Bottom - 2 &&
+        CoversArea(bounds, monitor) &&
         (!IsZoomed(window) || (GetWindowLong(window, -16) & 0x00c00000) == 0);
+
+    private static bool CoversArea(Rectangle bounds, Rectangle area) =>
+        !bounds.IsEmpty && !area.IsEmpty && bounds.Left <= area.Left + 2 && bounds.Top <= area.Top + 2 &&
+        bounds.Right >= area.Right - 2 && bounds.Bottom >= area.Bottom - 2;
 
     internal static void AttachChild(nint window, nint parent)
     {
