@@ -11,14 +11,11 @@ internal static class Native
     internal const int Transparent = 0x20;
     internal const int ToolWindow = 0x80;
     internal const int NoActivate = 0x08000000;
-    internal const int Topmost = 8;
     internal const int WmPaint = 0x0f;
     internal const uint NoMove = 2;
     internal const uint NoSize = 1;
-    internal const uint KeepOrder = 4;
     internal const uint Inactive = 0x10;
     internal const uint Show = 0x40;
-    internal static readonly nint HwndTopmost = new(-1);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativePoint
@@ -159,12 +156,22 @@ internal static class Native
     internal static bool IsFullscreen(Rectangle window, Rectangle monitor) =>
         !window.IsEmpty && window.Left <= monitor.Left + 2 && window.Top <= monitor.Top + 2 &&
         window.Right >= monitor.Right - 2 && window.Bottom >= monitor.Bottom - 2;
+
+    internal static void AttachChild(nint window, nint parent)
+    {
+        const int style = -16;
+        SetWindowLong(window, style, (GetWindowLong(window, style) & ~Popup) | Child);
+        SetParent(window, parent);
+        var error = Marshal.GetLastWin32Error();
+        if (GetParent(window) != parent)
+            throw new System.ComponentModel.Win32Exception(error, "Не удалось присоединить окно к рабочему столу.");
+    }
 }
 
-internal readonly record struct DesktopHost(nint Parent, nint BehindIcons, bool Raised)
+internal readonly record struct DesktopHost(nint Parent, nint IconHost, nint Icons, bool Raised)
 {
     internal bool Available => Parent != 0 && Native.IsWindow(Parent) &&
-        (!Raised || Native.IsWindow(BehindIcons));
+        Native.IsWindow(IconHost) && Native.IsWindow(Icons);
 
     internal static DesktopHost TryFind()
     {
@@ -178,18 +185,23 @@ internal readonly record struct DesktopHost(nint Parent, nint BehindIcons, bool 
         var icons = Native.FindWindowEx(progman, 0, "SHELLDLL_DefView", null);
         var childWorker = Native.FindWindowEx(progman, 0, "WorkerW", null);
         if ((Native.GetWindowLong(progman, exStyle) & noRedirection) != 0 && icons != 0 && childWorker != 0)
-            return new(progman, icons, true);
+            return new(progman, progman, icons, true);
 
-        nint worker = 0;
+        DesktopHost classic = default;
         Native.EnumWindows((window, _) =>
         {
-            if (Native.FindWindowEx(window, 0, "SHELLDLL_DefView", null) == 0)
+            var view = Native.FindWindowEx(window, 0, "SHELLDLL_DefView", null);
+            if (view == 0)
                 return true;
 
-            worker = Native.FindWindowEx(0, window, "WorkerW", null);
-            return worker == 0;
+            var worker = Native.FindWindowEx(0, window, "WorkerW", null);
+            if (worker == 0)
+                return true;
+
+            classic = new(worker, window, view, false);
+            return false;
         }, 0);
 
-        return worker == 0 ? default : new(worker, 0, false);
+        return classic;
     }
 }

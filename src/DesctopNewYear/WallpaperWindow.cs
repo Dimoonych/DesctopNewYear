@@ -14,9 +14,11 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private ActorFrame? snowman, owl;
     private Rectangle weather;
     private bool weatherEnabled;
+    private PrankFrame prank;
     private (Daylight Light, int Ornaments, int Snow, int Missing)? painted;
 
     public bool Available => Handle != 0 && Native.IsWindow(Handle) && host.Available;
+    public nint IconHost => host.IconHost;
 
     public WallpaperWindow(DesktopHost host, YardScene scene)
     {
@@ -41,17 +43,12 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
                 ExStyle = Native.NoActivate | Native.ToolWindow | Native.Transparent |
                     (host.Raised ? Native.Layered : 0)
             });
-            const int style = -16;
-            Native.SetWindowLong(Handle, style, (Native.GetWindowLong(Handle, style) & ~Native.Popup) | Native.Child);
-            Native.SetParent(Handle, host.Parent);
-            var parentError = Marshal.GetLastWin32Error();
-            if (Native.GetParent(Handle) != host.Parent)
-                throw new Win32Exception(parentError, "Не удалось присоединить обои к Explorer.");
+            Native.AttachChild(Handle, host.Parent);
 
             if (host.Raised && !Native.SetLayeredWindowAttributes(Handle, 0, 255, 2))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
-            if (!Native.SetWindowPos(Handle, host.BehindIcons, position.X, position.Y,
+            if (!Native.SetWindowPos(Handle, host.Raised ? host.Icons : 0, position.X, position.Y,
                 layout.View.Width, layout.View.Height, Native.Inactive | Native.Show))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
         }
@@ -85,15 +82,34 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         dirty = Union(Union(dirty, weather), nextWeather);
         weather = nextWeather;
         weatherEnabled = showWeather;
-        if (!dirty.IsEmpty)
+        var nextPrank = scene.Prank;
+        if (nextPrank != prank)
         {
-            dirty.Intersect(new Rectangle(Point.Empty, layout.View.Size));
-            if (!dirty.IsEmpty)
-            {
-                var rectangle = new Native.NativeRect(dirty);
-                Native.InvalidateRect(Handle, ref rectangle, false);
-            }
+            Invalidate(Union(PrankRegion(prank.Hat, 32), PrankRegion(nextPrank.Hat, 32)));
+            Invalidate(Union(PrankRegion(prank.Snowball, 8), PrankRegion(nextPrank.Snowball, 8)));
+            prank = nextPrank;
         }
+        Invalidate(dirty);
+    }
+
+    private Rectangle PrankRegion(PointF? point, float radius)
+    {
+        if (point is not { } active)
+            return Rectangle.Empty;
+        radius *= layout.Scale;
+        var x = active.X - layout.View.X;
+        var y = active.Y - layout.View.Y;
+        return Rectangle.FromLTRB((int)Math.Floor(x - radius), (int)Math.Floor(y - radius),
+            (int)Math.Ceiling(x + radius), (int)Math.Ceiling(y + radius));
+    }
+
+    private void Invalidate(Rectangle dirty)
+    {
+        dirty.Intersect(new Rectangle(Point.Empty, layout.View.Size));
+        if (dirty.Width <= 0 || dirty.Height <= 0)
+            return;
+        var rectangle = new Native.NativeRect(dirty);
+        Native.InvalidateRect(Handle, ref rectangle, false);
     }
 
     private void MarkActor(ref Rectangle dirty, ActorFrame? previous, ActorFrame? next)
@@ -135,6 +151,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
             YardArt.Prepare(graphics);
             if (weatherEnabled)
                 scene.DrawWeather(graphics, flakes);
+            DrawPrank(graphics);
             DrawActor(graphics, snowman, region);
             DrawActor(graphics, owl, region);
         }
@@ -142,6 +159,19 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         {
             Native.EndPaint(message.HWnd, ref paint);
         }
+    }
+
+    private void DrawPrank(Graphics graphics)
+    {
+        if (prank.Hat is { } hat)
+            YardArt.Hat(graphics, new(hat.X - layout.View.X, hat.Y - layout.View.Y), layout.Scale * .88f, prank.Angle);
+        if (prank.Snowball is not { } ball)
+            return;
+        var scale = layout.Scale;
+        var x = ball.X - layout.View.X;
+        var y = ball.Y - layout.View.Y;
+        graphics.FillEllipse(Brushes.LightSteelBlue, x - 5 * scale, y - 5 * scale, 10 * scale, 10 * scale);
+        graphics.FillEllipse(Brushes.White, x - 4 * scale, y - 5 * scale, 7.2f * scale, 7.2f * scale);
     }
 
     private void DrawActor(Graphics graphics, ActorFrame? actor, Rectangle dirty)

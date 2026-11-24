@@ -7,6 +7,7 @@ namespace DesctopNewYear;
 internal sealed class SpriteWindow : NativeWindow, IDisposable
 {
     private readonly bool owl;
+    private readonly nint desktop;
     private Bitmap? surface;
     private nint dc, dib, previous;
     private ActorFrame? drawn;
@@ -20,15 +21,27 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
     public event Action<Point>? Dropped;
     public event Action? CaptureLost;
 
-    public SpriteWindow(bool owl)
+    public bool Available => Handle != 0 && Native.IsWindow(Handle);
+
+    public SpriteWindow(bool owl, nint desktop)
     {
         this.owl = owl;
+        this.desktop = desktop;
         CreateHandle(new CreateParams
         {
             Caption = owl ? "DesctopNewYear — сова" : "DesctopNewYear — снеговик",
             Style = Native.Popup,
-            ExStyle = Native.Layered | Native.NoActivate | Native.ToolWindow | Native.Topmost
+            ExStyle = Native.Layered | Native.NoActivate | Native.ToolWindow
         });
+        try
+        {
+            Native.AttachChild(Handle, desktop);
+        }
+        catch
+        {
+            DestroyHandle();
+            throw;
+        }
     }
 
     public void Draw(ActorFrame? frame, float scale, Rectangle monitor)
@@ -39,8 +52,8 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
             return;
         }
 
-        var width = (int)Math.Ceiling((owl ? 108 : 128) * scale);
-        var height = (int)Math.Ceiling((owl ? 99 : 139) * scale);
+        var width = (int)Math.Ceiling(actor.ArtWidth * scale);
+        var height = (int)Math.Ceiling(actor.ArtHeight * scale);
         var left = (int)Math.Round(actor.Feet.X - width / 2f);
         var top = (int)Math.Round(actor.Feet.Y - height + 4 * scale);
         var clip = Rectangle.Intersect(new Rectangle(left, top, width, height), monitor);
@@ -70,15 +83,17 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
         }
 
         var destination = new Native.NativePoint(left, top);
+        if (!Native.ScreenToClient(desktop, ref destination))
+            throw new Win32Exception("Не удалось определить положение персонажа на рабочем столе.");
         var size = new Native.NativeSize(width, height);
         var source = new Native.NativePoint();
         var blend = new Native.Blend { Alpha = 255, Format = 1 };
         if (!Native.UpdateLayeredWindow(Handle, 0, ref destination, ref size, dc, ref source, 0, ref blend, 2))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось обновить окно персонажа.");
 
-        if (!visible)
-            Native.SetWindowPos(Handle, Native.HwndTopmost, 0, 0, 0, 0,
-                Native.NoMove | Native.NoSize | Native.Inactive | Native.Show);
+        if (!visible && !Native.SetWindowPos(Handle, 0, 0, 0, 0, 0,
+                Native.NoMove | Native.NoSize | Native.Inactive | Native.Show))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось показать персонажа на рабочем столе.");
 
         visible = true;
         drawn = actor;

@@ -13,13 +13,12 @@ internal sealed class YardContext : ApplicationContext
     private readonly ToolStripMenuItem wallpaperOnly = new("Только обои");
     private readonly ToolStripMenuItem monitors = new("Экран");
     private readonly ToolStripMenuItem status = new() { Enabled = false };
-    private readonly SpriteWindow snowman = new(owl: false);
-    private readonly SpriteWindow owl = new(owl: true);
     private readonly Icon icon;
     private readonly NotifyIcon tray;
+    private readonly ExitShortcut exitShortcut;
     private readonly YardScene scene;
     private WallpaperWindow? wallpaper;
-    private Rectangle foreground;
+    private SpriteWindow? snowman, owl;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
     private (int Ornaments, int Snow) saved;
@@ -36,13 +35,9 @@ internal sealed class YardContext : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true
         };
+        exitShortcut = new ExitShortcut(ExitThread);
         ConfigureMenu();
 
-        snowman.Clicked += _ => Run(scene.GreetSnowman);
-        owl.Clicked += cursor => Run(() => scene.TouchOwl(cursor));
-        owl.Dragged += scene.DragOwl;
-        owl.Dropped += _ => scene.DropOwl(Native.ForegroundBounds());
-        owl.CaptureLost += scene.CancelDrag;
         tray.DoubleClick += (_, _) => TogglePause();
 
         timer.Tick += (_, _) => Tick();
@@ -52,16 +47,23 @@ internal sealed class YardContext : ApplicationContext
 
     private void ConfigureMenu()
     {
+        var exit = Item("Выйти", ExitThread);
+        exit.ShortcutKeyDisplayString = exitShortcut.Registered ? ExitShortcut.Display : "";
+        exit.ToolTipText = exitShortcut.Registered ? "" : "Горячая клавиша занята другим приложением.";
         menu.Items.AddRange([
             status, new ToolStripSeparator(),
+            Item("Позвать снеговика на прогулку", () => Run(scene.StartWalk)),
             Item("Сходить за игрушкой", () => Run(scene.StartToy)),
+            Item("Позвать сову", () => Run(scene.CallOwl)),
+            Item("Сова, верни шляпу!", () => Run(scene.CallHatPrank)),
             Item("Включить снегопад", () => Run(scene.StartSnow)),
             Item("Позвать снеговика с лопатой", () => Run(scene.CallCleaner)),
+            Item("Выпустить трактор", () => Run(scene.CallTractor)),
             Item("Убрать снег сразу", () => Run(scene.ClearSnow)),
             new ToolStripSeparator(),
             Item("Освещение…", ConfigureLight),
             monitors, wallpaperOnly, pause,
-            Item("Выйти", ExitThread)
+            exit
         ]);
         pause.Click += (_, _) => TogglePause();
         wallpaperOnly.Click += (_, _) =>
@@ -151,35 +153,23 @@ internal sealed class YardContext : ApplicationContext
             if (scene.Layout != layout)
             {
                 scene.SetLayout(layout);
-                wallpaper?.Dispose();
-                wallpaper = null;
+                ReleaseDesktop();
                 nextAttach = 0;
             }
-            foreground = Native.ForegroundBounds();
-            fullscreen = Native.IsFullscreen(foreground, layout.View);
+            fullscreen = Native.IsFullscreen(Native.ForegroundBounds(), layout.View);
         }
 
-        if (wallpaper is not { Available: true } && elapsed >= nextAttach)
+        if (elapsed >= nextAttach &&
+            (wallpaper is not { Available: true } || snowman is not { Available: true } || owl is not { Available: true }))
         {
             nextAttach = elapsed + 12;
-            wallpaper?.Dispose();
-            wallpaper = null;
-            try
-            {
-                var host = DesktopHost.TryFind();
-                if (host.Available)
-                    wallpaper = new WallpaperWindow(host, scene);
-            }
-            catch (Win32Exception)
-            {
-                // Explorer can recreate its wallpaper host during display changes.
-            }
+            AttachDesktop();
         }
 
         var now = DateTime.Now;
-        owl.UpdateDrag();
+        owl?.UpdateDrag();
         if (!paused && !fullscreen)
-            scene.Advance(seconds, Daylight.At(now, settings), foreground, now);
+            scene.Advance(seconds, Daylight.At(now, settings), now);
         Render(now);
         if (saved != (settings.Ornaments, settings.Snow))
             Save();
@@ -189,36 +179,72 @@ internal sealed class YardContext : ApplicationContext
             timer.Interval = interval;
     }
 
-    private void Render(DateTime now)
+    private void AttachDesktop()
     {
-        var layout = scene.Layout;
-        var snowmanFrame = scene.Snowman;
-        ActorFrame? owlFrame = scene.Owl;
-        ActorFrame? backSnowman = null, backOwl = null;
-        var hasWallpaper = wallpaper is { Available: true };
-        if (hasWallpaper)
+        ReleaseSprites();
+        try
         {
-            if (settings.WallpaperOnly || scene.SnowmanInYard && Covered(snowmanFrame, layout))
+            if (wallpaper is not { Available: true })
             {
-                backSnowman = snowmanFrame;
-                snowmanFrame = null;
+                ReleaseDesktop();
+                var host = DesktopHost.TryFind();
+                if (!host.Available)
+                    return;
+                wallpaper = new WallpaperWindow(host, scene);
             }
-            if (settings.WallpaperOnly || scene.OwlInYard && Covered(owlFrame, layout))
-            {
-                backOwl = owlFrame;
-                owlFrame = null;
-            }
-            wallpaper!.Draw(Daylight.At(now, settings), settings, backSnowman, backOwl, !fullscreen && !paused);
-        }
-        if (fullscreen || settings.WallpaperOnly)
-            snowmanFrame = owlFrame = null;
 
-        snowman.Draw(snowmanFrame, layout.Scale, layout.View);
-        owl.Draw(owlFrame, layout.Scale, layout.View);
+            snowman = new SpriteWindow(owl: false, wallpaper.IconHost);
+            owl = new SpriteWindow(owl: true, wallpaper.IconHost);
+            snowman.Clicked += _ => Run(scene.GreetSnowman);
+            owl.Clicked += cursor => Run(() => scene.TouchOwl(cursor));
+            owl.Dragged += scene.DragOwl;
+            owl.Dropped += _ => scene.DropOwl();
+            owl.CaptureLost += scene.CancelDrag;
+        }
+        catch (Win32Exception)
+        {
+            // Explorer may be restarting. Draw on the wallpaper while the input layers recover.
+            ReleaseSprites();
+        }
     }
 
-    private bool Covered(ActorFrame? actor, YardLayout layout) =>
-        actor is { } frame && foreground.IntersectsWith(frame.Footprint(layout.Scale, Point.Empty));
+    private void Render(DateTime now)
+    {
+        if (wallpaper is not { Available: true })
+            return;
+
+        var layout = scene.Layout;
+        var snowmanFrame = scene.Snowman;
+        var owlFrame = scene.Owl;
+        var interactive = !settings.WallpaperOnly && snowman is { Available: true } && owl is { Available: true };
+
+        try
+        {
+            snowman?.Draw(interactive && !fullscreen ? snowmanFrame : null, layout.Scale, layout.View);
+            owl?.Draw(interactive && !fullscreen ? owlFrame : null, layout.Scale, layout.View);
+        }
+        catch (Win32Exception)
+        {
+            ReleaseSprites();
+            interactive = false;
+        }
+        wallpaper.Draw(Daylight.At(now, settings), settings, interactive ? null : snowmanFrame,
+            interactive ? null : owlFrame, !fullscreen && !paused);
+    }
+
+    private void ReleaseSprites()
+    {
+        owl?.Dispose();
+        snowman?.Dispose();
+        owl = snowman = null;
+    }
+
+    private void ReleaseDesktop()
+    {
+        ReleaseSprites();
+        wallpaper?.Dispose();
+        wallpaper = null;
+    }
 
     private YardLayout PickLayout()
     {
@@ -261,13 +287,12 @@ internal sealed class YardContext : ApplicationContext
             disposed = true;
             timer.Stop();
             timer.Dispose();
+            exitShortcut.Dispose();
             tray.Visible = false;
             tray.Dispose();
             menu.Dispose();
             icon.Dispose();
-            owl.Dispose();
-            snowman.Dispose();
-            wallpaper?.Dispose();
+            ReleaseDesktop();
         }
         base.Dispose(disposing);
     }

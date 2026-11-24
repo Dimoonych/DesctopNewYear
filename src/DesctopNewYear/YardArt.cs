@@ -277,9 +277,10 @@ internal static class YardArt
         Ellipse(g, ice, -20, -75, 40, 44);
         Ellipse(g, white, -20, -77, 37, 42);
         Line(g, twig, 3.5f, -15, -49, -32, -57 - step * 4);
-        var arm = actor.Pose is Pose.React or Pose.Hang ? -88 : -51 + step * 6;
-        Line(g, twig, 3.5f, 15, -53, 31, arm);
-        Line(g, twig, 2, 29, arm + 2, 36, arm - 4);
+        var arm = actor.Pose is Pose.React or Pose.Hang ? -88 : actor.Pose == Pose.Throw ? -74 : -51 + step * 6;
+        var reach = actor.Pose == Pose.Throw ? 43 : 31;
+        Line(g, twig, 3.5f, 15, -53, reach, arm);
+        Line(g, twig, 2, reach - 2, arm + 2, reach + 5, arm - 4);
 
         Ellipse(g, ice, -20, -105, 41, 37);
         Ellipse(g, white, -20, -106, 37, 35);
@@ -289,10 +290,8 @@ internal static class YardArt
         Ellipse(g, C("#edb0a8"), -3, -83, 7, 4);
         Ellipse(g, dark, 7, -78, 2.5f, 2.5f);
         Ellipse(g, dark, 11, -77, 2.5f, 2.5f);
-        Poly(g, dark, new(-17, -103), new(-15, -123), new(11, -125), new(17, -105));
-        Poly(g, C("#63788b"), new(-15, -121), new(-12, -122), new(-12, -105), new(-16, -105));
-        Rect(g, scarf, -16, -109, 31, 5);
-        Ellipse(g, dark, -25, -107, 52, 8);
+        if (!actor.NoHat)
+            Hat(g, new(0, -102), 1, 0);
         Ellipse(g, scarf, -20, -75, 41, 11);
         Poly(g, scarf, new(-11, -68), new(0, -68), new(-6 + step * 3, -48), new(-18 + step * 3, -49));
         Ellipse(g, dark, 6, -56, 4.5f, 4.5f);
@@ -326,6 +325,79 @@ internal static class YardArt
         Poly(g, C("#7194ab"), new(endX - 7, endY - 4), new(endX + 8, endY - 6),
             new(endX + 13, endY + 7), new(endX - 4, endY + 12));
         Line(g, C("#e3edf1"), 2, endX - 3, endY + 10, endX + 12, endY + 6);
+    }
+
+    public static void Hat(Graphics g, PointF position, float scale, float angle)
+    {
+        var state = g.Save();
+        g.TranslateTransform(position.X, position.Y);
+        g.RotateTransform(angle);
+        g.ScaleTransform(scale, scale);
+        var navy = C("#33435b");
+        Poly(g, navy, new(-17, -1), new(-15, -21), new(11, -23), new(17, -3));
+        Poly(g, C("#63788b"), new(-15, -19), new(-12, -20), new(-12, -3), new(-16, -3));
+        Rect(g, C("#bb494b"), -16, -7, 31, 5);
+        Ellipse(g, navy, -25, -5, 52, 8);
+        g.Restore(state);
+    }
+
+    public static void Tractor(Graphics g, ActorFrame actor)
+    {
+        var ink = C("#283445");
+        var trim = C("#deb379");
+        var body = C("#c46348");
+        var highlight = C("#f2a562");
+        Ellipse(g, Color.FromArgb(75, ink), -84, -9, 172, 12);
+
+        var saved = g.Save();
+        g.TranslateTransform(-32, -44);
+        g.ScaleTransform(.51f, .51f);
+        Snowman(g, actor with { Pose = Pose.Rest, Toy = -1 });
+        g.Restore(saved);
+
+        Line(g, ink, 4, -65, -50, -65, -112);
+        Line(g, ink, 4, -2, -49, -2, -112);
+        Line(g, body, 6, -72, -113, 6, -113);
+        Line(g, highlight, 2, -72, -116, 6, -116);
+        Poly(g, body, new(-70, -42), new(-61, -56), new(59, -56), new(67, -36), new(58, -22), new(-68, -22));
+        Rect(g, highlight, -3, -57, 62, 7);
+        Rect(g, trim, 45, -49, 15, 8);
+        Rect(g, C("#fcdfa0"), 60, -47, 7, 9);
+        for (var i = 0; i < 3; i++)
+            Line(g, C("#743d43"), 1.5f, 18 + i * 6, -44, 18 + i * 6, -34);
+        Line(g, ink, 5, 35, -57, 35, -70);
+        Line(g, ink, 4, 35, -70, 42, -70);
+
+        Wheel(g, new(-40, -23), 23, actor.Time * 8, ink, trim);
+        Wheel(g, new(44, -15), 15, actor.Time * 12, ink, trim);
+        Line(g, ink, 5, 55, -29, 81, -22);
+        Poly(g, C("#64879f"), new(75, -39), new(90, -37), new(88, -21),
+            new(96, -9), new(80, -6), new(73, -17));
+        Line(g, C("#d7e5e7"), 2.5f, 79, -8, 95, -11);
+
+        if (!actor.Plowing)
+            return;
+        for (var i = 0; i < 7; i++)
+        {
+            var progress = (actor.Time * 5 + i * .23f) % 1;
+            var x = 82 + 20 * progress;
+            var y = -10 - MathF.Sin(progress * MathF.PI) * (9 + 5 * (i % 3));
+            Ellipse(g, Color.FromArgb((int)(245 * (1 - progress)), C("#eff7f9")), x, y, 3, 3);
+        }
+    }
+
+    private static void Wheel(Graphics g, PointF center, float radius, float rotation, Color ink, Color trim)
+    {
+        Ellipse(g, ink, center.X - radius, center.Y - radius, radius * 2, radius * 2);
+        Ellipse(g, C("#566474"), center.X - radius * .68f, center.Y - radius * .68f, radius * 1.36f, radius * 1.36f);
+        for (var i = 0; i < 5; i++)
+        {
+            var angle = rotation + i * 2 * MathF.PI / 5;
+            var x = MathF.Cos(angle) * radius * .56f;
+            var y = MathF.Sin(angle) * radius * .56f;
+            Line(g, trim, 2, center.X + x * .5f, center.Y + y * .5f, center.X + x, center.Y + y);
+        }
+        Ellipse(g, trim, center.X - 4, center.Y - 4, 8, 8);
     }
 
     public static void Owl(Graphics g, ActorFrame actor)
@@ -362,6 +434,8 @@ internal static class YardArt
         Line(g, C("#ac795a"), 2.5f, 4, -4, 11, -5);
         if (actor.Toy >= 0)
             Ornament(g, new(9, -29), actor.Toy, .85f);
+        if (actor.HoldingHat)
+            Hat(g, new(9, -26), .76f, -22);
     }
 
     public static void Ornament(Graphics g, PointF at, int number, float scale)
