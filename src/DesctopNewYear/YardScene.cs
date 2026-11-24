@@ -1,9 +1,10 @@
 namespace DesctopNewYear;
 
-internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp, RollableSnow, Wipe }
+internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp, RollableSnow, Wipe, FatherFrost }
 
 internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int Direction, int Toy, float Time,
-    bool NoHat = false, bool HoldingHat = false, bool Plowing = false, bool RecoveredToy = false, float Snowball = 0)
+    bool NoHat = false, bool HoldingHat = false, bool Plowing = false, bool RecoveredToy = false, float Snowball = 0,
+    bool SpecialGift = false)
 {
     public int ArtWidth => Pose == Pose.RollableSnow ? (int)MathF.Ceiling(Snowball * 2 + 8) :
         Pose == Pose.Tractor ? 214 : Owl ? 108 : 128;
@@ -32,7 +33,9 @@ internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int
         else
         {
             graphics.ScaleTransform(Direction, 1);
-            if (Pose == Pose.Tractor)
+            if (Pose == Pose.FatherFrost)
+                YardArt.FatherFrost(graphics, this);
+            else if (Pose == Pose.Tractor)
                 YardArt.Tractor(graphics, this);
             else
                 YardArt.Snowman(graphics, this);
@@ -48,7 +51,7 @@ internal sealed class YardScene
     {
         Rest, WalkAround, Inspect, Leave, Away, Carry, Hang, Return, ToPath, Clean,
         FetchTractor, TractorAway, Plow, ParkTractor, FindHat, PickHat, FindToy, PickToy,
-        ShapeBase, GoForHead, ShapeHead, CarryHead, StackHead
+        ShapeBase, GoForHead, ShapeHead, CarryHead, StackHead, FetchGift, PickGift, HangGift
     }
     private enum OwlAction
     {
@@ -60,6 +63,7 @@ internal sealed class YardScene
 
     private readonly YardSettings settings;
     private readonly Random random;
+    private readonly WinterVisit winterVisit;
     private SnowmanAction snowmanAction;
     private OwlAction owlAction;
     private PointF snowman, owl, owlStart, owlTarget;
@@ -124,12 +128,13 @@ internal sealed class YardScene
     public bool InMotion => snowmanAction is not (SnowmanAction.Rest or SnowmanAction.Away or
         SnowmanAction.TractorAway or SnowmanAction.ParkTractor) ||
         snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown || hatGrabbed || CurrentPerch.HasValue ||
-        Snowing || Smoking || PowderFalling || miniGrabbed;
+        Snowing || Smoking || PowderFalling || miniGrabbed || winterVisit.InMotion;
 
     public YardScene(YardSettings settings, YardLayout layout, Random? random = null)
     {
         this.settings = settings;
         this.random = random ?? Random.Shared;
+        winterVisit = new(settings, Random.Shared);
         Layout = layout;
         snowman = layout.Home;
         owl = layout.Roof;
@@ -164,6 +169,8 @@ internal sealed class YardScene
             snowman = layout.Path;
         if (snowmanAction == SnowmanAction.ParkTractor)
             snowman = TractorExit;
+        if (snowmanAction is SnowmanAction.PickGift or SnowmanAction.HangGift)
+            snowman = WinterVisit.GiftSpot(layout, settings.WinterGiftTree);
 
         owl = layout.Roof;
         owlFlight = 0;
@@ -204,6 +211,8 @@ internal sealed class YardScene
                 SnowmanAction.PickHat or SnowmanAction.PickToy => Pose.PickUp,
                 SnowmanAction.ShapeBase or SnowmanAction.ShapeHead => Pose.PickUp,
                 SnowmanAction.StackHead => Pose.Hang,
+                SnowmanAction.PickGift => Pose.PickUp,
+                SnowmanAction.HangGift => Pose.Hang,
                 _ when owlAction == OwlAction.Steal && owlFlight > 0 => Pose.Rest,
                 _ when snowmanReaction > 0 => Pose.React,
                 SnowmanAction.Clean => powder > .5f ? Pose.Rest : Pose.Shovel,
@@ -218,7 +227,8 @@ internal sealed class YardScene
                 NoHat: hatMissing, Plowing: snowmanAction == SnowmanAction.Plow &&
                     (plowDepth > 0 || settings.Miniatures.Any(figure => figure.Snowfalls >= Miniature.BurialLimit)),
                 RecoveredToy: returningToy || decorationTree >= 0,
-                Snowball: snowmanAction is SnowmanAction.CarryHead or SnowmanAction.StackHead ? MiniHeadRadius : 0);
+                Snowball: snowmanAction is SnowmanAction.CarryHead or SnowmanAction.StackHead ? MiniHeadRadius : 0,
+                SpecialGift: snowmanAction == SnowmanAction.HangGift);
         }
     }
 
@@ -226,6 +236,10 @@ internal sealed class YardScene
         owlReaction > 0 || mouseDown ? Pose.React : Pose.Rest, owlLook, owlHasToy ? stolen : -1,
         owlFlight > 0 && !mouseDown ? AnimationTime : 0, HoldingHat: owlHasHat || owlAction == OwlAction.DeliverMiniHat);
 
+    public ActorFrame? FatherFrost => winterVisit.Frame(Layout);
+    public PointF? WinterGift => settings.WinterGiftTree >= 0 && snowmanAction != SnowmanAction.HangGift
+        ? WinterVisit.GiftSpot(Layout, settings.WinterGiftTree) : null;
+    private bool HandlingGift => snowmanAction is SnowmanAction.FetchGift or SnowmanAction.PickGift or SnowmanAction.HangGift;
     public ActorFrame? LooseSnowball => miniStage == MiniStage.Empty ? null :
         new ActorFrame(miniBall, false, Pose.RollableSnow, 1, -1, 0,
             Snowball: miniStage == MiniStage.Shaping ? 5 + 11 * Math.Clamp(snowmanTime / 1.2f, 0, 1) : miniRadius);
@@ -372,7 +386,7 @@ internal sealed class YardScene
 
     public bool TryGrabHat(Point cursor)
     {
-        if (hatMissing || hatGrabbed || BuildingMiniature || owlAction is OwlAction.TakeHat or OwlAction.Steal ||
+        if (hatMissing || hatGrabbed || BuildingMiniature || HandlingGift || owlAction is OwlAction.TakeHat or OwlAction.Steal ||
             stolen >= 0 && !returningToy ||
             Snowman is not { Pose: not Pose.Tractor } actor)
             return false;
@@ -513,7 +527,10 @@ internal sealed class YardScene
         toyFall = Math.Max(0, toyFall - seconds);
         shotAge = Math.Max(0, shotAge - seconds);
         AdvanceWeather(seconds, daylight);
-        AdvanceSnowman(seconds, localTime.Hour >= 23 || localTime.Hour < 7);
+        winterVisit.Advance(seconds, localTime, daylight.Shade >= 12, snowfall >= 12);
+        var giftReady = settings.WinterGiftTree >= 0 && localTime.Hour is >= 7 and < 18 &&
+            DateOnly.FromDateTime(localTime).DayNumber > settings.WinterGiftDay;
+        AdvanceSnowman(seconds, localTime.Hour >= 23 || localTime.Hour < 7, giftReady);
         if (!mouseDown)
             AdvanceOwl(seconds, window);
     }
@@ -550,7 +567,7 @@ internal sealed class YardScene
         smoke = daylight.WindowLit ? Math.Max(0, smoke - seconds) : 0;
     }
 
-    private void AdvanceSnowman(float seconds, bool late)
+    private void AdvanceSnowman(float seconds, bool late, bool giftReady)
     {
         if (hatGrabbed || (owlAction is OwlAction.TakeHat or OwlAction.Steal) && owlFlight > 0)
             return;
@@ -576,6 +593,11 @@ internal sealed class YardScene
         }
         else if (SnowmanFree && askedForMini && CanBuildMiniature)
             ShapeSnowball();
+        else if (SnowmanFree && giftReady)
+        {
+            snowmanReaction = 0;
+            SetSnowman(SnowmanAction.FetchGift);
+        }
 
         if (snowmanReaction > 0)
             return;
@@ -638,6 +660,19 @@ internal sealed class YardScene
                 break;
             case SnowmanAction.ToPath when WalkTo(Layout.Path, seconds):
                 SetSnowman(SnowmanAction.Clean);
+                break;
+            case SnowmanAction.FetchGift when WalkTo(WinterVisit.GiftSpot(Layout, settings.WinterGiftTree), seconds, 134):
+                direction = -1;
+                SetSnowman(SnowmanAction.PickGift);
+                break;
+            case SnowmanAction.PickGift when snowmanTime >= .9f:
+                SetSnowman(SnowmanAction.HangGift);
+                break;
+            case SnowmanAction.HangGift when snowmanTime >= 1.5f:
+                settings.WinterStars |= 1 << settings.WinterGiftTree;
+                settings.WinterGiftTree = -1;
+                settings.WinterGiftDay = 0;
+                SetSnowman(SnowmanAction.Return);
                 break;
             case SnowmanAction.Clean when snowmanTime >= 1.3f:
                 settings.Snow = Math.Max(0, settings.Snow - 1);

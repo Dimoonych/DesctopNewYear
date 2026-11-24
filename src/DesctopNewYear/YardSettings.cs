@@ -15,6 +15,10 @@ internal sealed class YardSettings
     public bool WallpaperOnly { get; set; }
     public int Ornaments { get; set; }
     public int PondOrnaments { get; set; }
+    public int NextWinterVisit { get; set; }
+    public int WinterGiftTree { get; set; } = -1;
+    public int WinterGiftDay { get; set; }
+    public int WinterStars { get; set; }
     public int MissingOrnament { get; set; } = -1;
     public int Snow { get; set; }
     public Miniature[] Miniatures { get; set; } = [];
@@ -44,6 +48,12 @@ internal sealed class YardSettings
         settings.LightsOff = Math.Clamp(settings.LightsOff, settings.Dusk + 60, 1439);
         settings.Ornaments = Math.Clamp(settings.Ornaments, 0, 7);
         settings.PondOrnaments = Math.Clamp(settings.PondOrnaments, 0, YardLayout.PondTreeCount * 3);
+        settings.WinterStars &= (1 << YardLayout.PondTreeCount) - 1;
+        if (settings.WinterGiftTree is < 0 or >= YardLayout.PondTreeCount || settings.WinterGiftDay <= 0)
+        {
+            settings.WinterGiftTree = -1;
+            settings.WinterGiftDay = 0;
+        }
         if (settings.MissingOrnament < 0 || settings.MissingOrnament >= Math.Min(settings.Ornaments, 6))
             settings.MissingOrnament = -1;
         settings.Snow = Math.Clamp(settings.Snow, 0, 3);

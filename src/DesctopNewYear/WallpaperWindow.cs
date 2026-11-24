@@ -12,15 +12,15 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private readonly Snowflake[] flakes;
     private readonly BufferedGraphicsContext frameBuffer;
     private Bitmap? landscape;
-    private ActorFrame? snowman, owl, ball;
-    private PointF? miniatureTarget;
+    private ActorFrame? snowman, owl, ball, fatherFrost;
+    private PointF? miniatureTarget, winterGift;
     private Rectangle weather;
     private int snowFrame = -1;
     private bool weatherEnabled;
     private PrankFrame prank;
     private SnowCover groundSnow;
     private Miniature[] miniatures = [];
-    private (Daylight Light, int Ornaments, int Missing, int PondOrnaments, int Frost)? painted;
+    private (Daylight Light, int Ornaments, int Missing, int PondOrnaments, int Frost, int WinterStars)? painted;
 
     public bool Available => Handle != 0 && Native.IsWindow(Handle) && host.Available;
     public nint IconHost => host.IconHost;
@@ -74,12 +74,13 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     public void Draw(Daylight daylight, YardSettings settings, ActorFrame? backSnowman, ActorFrame? backOwl,
         bool showWeather)
     {
-        var key = (daylight, settings.Ornaments, scene.StolenOrnament, settings.PondOrnaments, scene.LanternFrost);
+        var key = (daylight, settings.Ornaments, scene.StolenOrnament, settings.PondOrnaments, scene.LanternFrost,
+            settings.WinterStars);
         var dirty = Rectangle.Empty;
         if (painted != key)
         {
             var next = YardArt.Landscape(layout, daylight, settings.Ornaments, scene.StolenOrnament,
-                settings.PondOrnaments, scene.LanternFrost);
+                settings.PondOrnaments, scene.LanternFrost, settings.WinterStars);
             landscape?.Dispose();
             landscape = next;
             painted = key;
@@ -88,6 +89,15 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
 
         MarkActor(snowman, backSnowman);
         MarkActor(owl, backOwl);
+        var visitor = scene.FatherFrost;
+        MarkActor(fatherFrost, visitor);
+        fatherFrost = visitor;
+        var gift = scene.WinterGift;
+        if (gift != winterGift)
+        {
+            Invalidate(Union(PrankRegion(winterGift, 33), PrankRegion(gift, 33)));
+            winterGift = gift;
+        }
         var nextBall = scene.LooseSnowball;
         MarkActor(ball, nextBall);
         ball = nextBall;
@@ -218,9 +228,12 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         if (weatherEnabled)
             scene.DrawWeather(graphics, flakes);
         DrawPrank(graphics);
+        if (winterGift is { } gift)
+            YardArt.DrawWinterGift(graphics, new(gift.X - layout.View.X, gift.Y - layout.View.Y), layout.Scale);
         if (miniatureTarget is { } marker)
             YardArt.DrawSnowballTarget(graphics, new(marker.X - layout.View.X, marker.Y - layout.View.Y), layout.Scale);
         DrawActor(graphics, ball, region);
+        DrawActor(graphics, fatherFrost, region);
         DrawActor(graphics, snowman, region);
         DrawActor(graphics, owl, region);
     }

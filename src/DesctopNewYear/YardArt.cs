@@ -69,7 +69,7 @@ internal static class YardArt
         layout.Screen(-393 + Branches[index].X, Branches[index].Y);
 
     public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int missing = -1,
-        int pondOrnaments = 0, int lanternFrost = 0)
+        int pondOrnaments = 0, int lanternFrost = 0, int winterStars = 0)
     {
         var bitmap = new Bitmap(layout.View.Width, layout.View.Height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(bitmap);
@@ -87,7 +87,7 @@ internal static class YardArt
         DrawMountains(graphics, w, h, dark);
         DrawForest(graphics, w, h, layout.Scale, dark);
         DrawGround(graphics, w, h, dark);
-        DrawMeadow(graphics, layout, dark, pondOrnaments);
+        DrawMeadow(graphics, layout, dark, pondOrnaments, winterStars);
 
         graphics.TranslateTransform(layout.Anchor.X, layout.Anchor.Y);
         graphics.ScaleTransform(layout.Scale, layout.Scale);
@@ -193,7 +193,7 @@ internal static class YardArt
         g.DrawBezier(drift, w * .12f, h * .96f, w * .23f, h * .90f, w * .33f, h * .99f, w * .37f, h * .95f);
     }
 
-    private static void DrawMeadow(Graphics g, YardLayout layout, float dark, int ornaments)
+    private static void DrawMeadow(Graphics g, YardLayout layout, float dark, int ornaments, int winterStars)
     {
         var scale = layout.Scale;
         var w = layout.View.Width;
@@ -251,6 +251,12 @@ internal static class YardArt
             g.TranslateTransform(position.X - layout.View.X, position.Y - layout.View.Y);
             g.ScaleTransform(treeScale, treeScale);
             DrawTree(g, 0, 0, placed, iceEdge, dark, -1, i);
+            if ((winterStars & (1 << i)) != 0)
+            {
+                var branch = new PointF(23, -130);
+                Glow(g, branch, 26, C("#c9edff"), 120);
+                WinterStar(g, branch, 10);
+            }
             g.Restore(state);
         }
         DrawBench(g, layout.PondBench, scale, iceEdge, dark);
@@ -528,6 +534,8 @@ internal static class YardArt
 
         if (actor.Snowball > 0)
             DrawSnowball(g, actor.Snowball, new(30, actor.Pose == Pose.Hang ? -88 : -56));
+        if (actor.SpecialGift)
+            WinterStar(g, new(40, -91), 10);
 
         if (actor.Pose != Pose.Shovel)
             return;
@@ -538,6 +546,61 @@ internal static class YardArt
         Poly(g, C("#7194ab"), new(endX - 7, endY - 4), new(endX + 8, endY - 6),
             new(endX + 13, endY + 7), new(endX - 4, endY + 12));
         Line(g, C("#e3edf1"), 2, endX - 3, endY + 10, endX + 12, endY + 6);
+    }
+
+    public static void FatherFrost(Graphics g, ActorFrame actor)
+    {
+        var stride = MathF.Sin(actor.Time * 8) * 5;
+        var trim = C("#e5eff5");
+        var coat = C("#8b3a53");
+        var shadow = C("#542b47");
+        Ellipse(g, Color.FromArgb(80, shadow), -39, -8, 77, 12);
+        Ellipse(g, shadow, -24 + stride, -13, 23, 12);
+        Ellipse(g, shadow, 4 - stride, -13, 21, 12);
+        Poly(g, coat, new(-21, -85), new(20, -85), new(32, -12), new(-32, -12));
+        Poly(g, shadow, new(-21, -82), new(-9, -80), new(-12, -14), new(-31, -14));
+        Rect(g, trim, -30, -17, 60, 7);
+        Rect(g, trim, -3, -78, 8, 62);
+        Rect(g, shadow, -26, -47, 52, 6);
+        Ellipse(g, C("#e4ad95"), -19, -114, 39, 39);
+        Poly(g, trim, new(-19, -98), new(-4, -91), new(18, -98),
+            new(21, -83), new(9, -63), new(-7, -60), new(-18, -78));
+        Ellipse(g, shadow, 6, -101, 4, 4);
+        Ellipse(g, C("#da9b89"), 12, -96, 8, 6);
+        Poly(g, coat, new(-23, -109), new(-18, -129), new(12, -132), new(22, -109));
+        Rect(g, trim, -23, -114, 45, 8);
+        Line(g, coat, 10, 16, -78, 32, -58);
+        Ellipse(g, trim, 26, -64, 12, 11);
+        Line(g, C("#9fc1db"), 4, -40 + stride * .4f, -5, -40, -115);
+        WinterStar(g, new(-40, -119), 9);
+        if (actor.SpecialGift)
+            DrawWinterGift(g, new(36, -47), .8f);
+    }
+
+    public static void DrawWinterGift(Graphics g, PointF basePoint, float scale)
+    {
+        var state = g.Save();
+        g.TranslateTransform(basePoint.X, basePoint.Y);
+        g.ScaleTransform(scale, scale);
+        var ribbon = C("#f0ce87");
+        Rect(g, C("#6e415d"), -15, -21, 30, 20);
+        Rect(g, C("#a65967"), -16, -24, 32, 7);
+        Rect(g, ribbon, -2, -24, 4, 23);
+        Line(g, ribbon, 2, -6, -28, 0, -24);
+        Line(g, ribbon, 2, 6, -28, 0, -24);
+        g.Restore(state);
+    }
+
+    private static void WinterStar(Graphics g, PointF center, float radius)
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            var angle = i * MathF.PI / 3;
+            var x = MathF.Cos(angle) * radius;
+            var y = MathF.Sin(angle) * radius;
+            Line(g, C("#cdefff"), 2.1f, center.X - x, center.Y - y, center.X + x, center.Y + y);
+        }
+        Ellipse(g, Color.White, center.X - 2, center.Y - 2, 4, 4);
     }
 
     public static void DrawSnowball(Graphics g, float radius, PointF center)

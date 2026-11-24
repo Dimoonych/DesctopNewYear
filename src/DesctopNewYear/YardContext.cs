@@ -22,9 +22,12 @@ internal sealed class YardContext : ApplicationContext
     private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
-    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures) saved;
-    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures) Progress =>
-        (settings.Ornaments, settings.PondOrnaments, settings.Snow, settings.MissingOrnament, settings.Miniatures);
+    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures,
+        int VisitDay, int GiftTree, int GiftDay, int WinterStars) saved;
+    private (int Ornaments, int PondOrnaments, int Snow, int MissingOrnament, Miniature[] Miniatures,
+        int VisitDay, int GiftTree, int GiftDay, int WinterStars) Progress =>
+        (settings.Ornaments, settings.PondOrnaments, settings.Snow, settings.MissingOrnament, settings.Miniatures,
+            settings.NextWinterVisit, settings.WinterGiftTree, settings.WinterGiftDay, settings.WinterStars);
 
     public YardContext()
     {
