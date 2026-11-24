@@ -14,6 +14,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private Bitmap? landscape;
     private ActorFrame? snowman, owl;
     private Rectangle weather;
+    private int snowFrame = -1;
     private bool weatherEnabled;
     private PrankFrame prank;
     private (Daylight Light, int Ornaments, int Snow, int Missing)? painted;
@@ -27,8 +28,10 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         this.scene = scene;
         layout = scene.Layout;
         var random = new Random(31417);
-        flakes = Enumerable.Range(0, 54).Select(_ => new Snowflake(
-            random.NextSingle(), random.NextSingle(), 21 + random.NextSingle() * 60,
+        const int columns = 8, rows = 9;
+        flakes = Enumerable.Range(0, columns * rows).Select(i => new Snowflake(
+            (i % columns + random.NextSingle()) / columns,
+            (i / columns + random.NextSingle()) / rows, 21 + random.NextSingle() * 60,
             1.6f + random.NextSingle() * 2.8f, .36f + random.NextSingle() * .64f)).ToArray();
 
         var position = new Native.NativePoint(layout.View.X, layout.View.Y);
@@ -84,15 +87,23 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         snowman = backSnowman;
         owl = backOwl;
 
-        var nextWeather = showWeather ? scene.WeatherFootprint() : Rectangle.Empty;
+        var nextWeather = showWeather ? scene.AmbientFootprint() : Rectangle.Empty;
         dirty = Union(Union(dirty, weather), nextWeather);
         weather = nextWeather;
         weatherEnabled = showWeather;
+        var nextSnowFrame = showWeather ? scene.SnowFrame : -1;
+        if (nextSnowFrame != snowFrame)
+        {
+            dirty = layout.SnowArea;
+            snowFrame = nextSnowFrame;
+        }
+
         var nextPrank = scene.Prank;
         if (nextPrank != prank)
         {
             Invalidate(Union(PrankRegion(prank.Hat, 32), PrankRegion(nextPrank.Hat, 32)));
             Invalidate(Union(PrankRegion(prank.Snowball, 8), PrankRegion(nextPrank.Snowball, 8)));
+            Invalidate(Union(PrankRegion(prank.Toy?.Position, 15), PrankRegion(nextPrank.Toy?.Position, 15)));
             prank = nextPrank;
         }
         Invalidate(dirty);
@@ -187,6 +198,9 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     {
         if (prank.Hat is { } hat)
             YardArt.Hat(graphics, new(hat.X - layout.View.X, hat.Y - layout.View.Y), layout.Scale * .88f, prank.Angle);
+        if (prank.Toy is { } toy)
+            YardArt.Ornament(graphics, new(toy.Position.X - layout.View.X, toy.Position.Y - layout.View.Y),
+                toy.Index, layout.Scale * 1.1f);
         if (prank.Snowball is not { } ball)
             return;
         var scale = layout.Scale;

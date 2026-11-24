@@ -21,8 +21,7 @@ internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
     public PointF Roof => Screen(-134, -202);
     public PointF Lantern => Screen(-465, -106);
     public PointF Branch => Screen(-393, -112);
-    public Rectangle SnowArea => Rectangle.FromLTRB(Math.Max(0, (int)(Anchor.X - 740 * Scale)), 0,
-        View.Width, (int)Anchor.Y + 35);
+    public Rectangle SnowArea => new(Point.Empty, View.Size);
 }
 
 internal static class YardArt
@@ -37,6 +36,9 @@ internal static class YardArt
         new(-25, -141), new(25, -113), new(-48, -89), new(44, -58),
         new(-18, -51), new(12, -80)
     ];
+
+    public static PointF OrnamentPosition(YardLayout layout, int index) =>
+        layout.Screen(-393 + Branches[index].X, Branches[index].Y);
 
     public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int snow, int missing = -1)
     {
@@ -436,7 +438,7 @@ internal static class YardArt
         {
             var held = actor.Pose is Pose.React or Pose.Hang
                 ? new PointF(35, -92) : new PointF(32, -54);
-            if (actor.Toy == 3)
+            if (actor.Toy == 3 && !actor.RecoveredToy)
             {
                 using var cord = new Pen(C("#63867c"), 2);
                 var end = new PointF(held.X + 27, -12);

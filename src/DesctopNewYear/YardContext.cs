@@ -55,6 +55,7 @@ internal sealed class YardContext : ApplicationContext
             status, new ToolStripSeparator(),
             Item("Позвать снеговика на прогулку", () => Run(scene.StartWalk)),
             Item("Сходить за игрушкой", () => Run(scene.StartToy)),
+            Item("Сова, верни игрушку!", () => Run(scene.AskForToyTheft)),
             Item("Позвать сову", () => Run(scene.CallOwl)),
             Item("Сова, на окно", () => Run(scene.AskForPerch)),
             Item("Сова, верни шляпу!", () => Run(scene.CallHatPrank)),
