@@ -27,6 +27,7 @@ internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
 
 internal static class YardArt
 {
+    public const float SnowmanHatHeight = 102;
     private static readonly Color[] OrnamentColors =
     [
         C("#e76b58"), C("#f6c774"), C("#99d9d5"), C("#e68fae"), C("#9bc8ed"), C("#ee9c66"), C("#ffe4a2")
@@ -262,9 +263,10 @@ internal static class YardArt
 
     public static void Snowman(Graphics g, ActorFrame actor)
     {
-        var step = actor.Pose == Pose.Walk ? MathF.Sin(actor.Time * 14) : 0;
-        var bob = Math.Abs(step) * 2.5f;
-        g.TranslateTransform(0, -bob);
+        if (actor.Pose == Pose.PickUp)
+            g.RotateTransform(14);
+        var step = actor.WalkStep;
+        g.TranslateTransform(0, -actor.Bob);
         var white = C("#f8faf6");
         var ice = C("#b5d1dc");
         var dark = C("#33435b");
@@ -277,8 +279,14 @@ internal static class YardArt
         Ellipse(g, ice, -20, -75, 40, 44);
         Ellipse(g, white, -20, -77, 37, 42);
         Line(g, twig, 3.5f, -15, -49, -32, -57 - step * 4);
-        var arm = actor.Pose is Pose.React or Pose.Hang ? -88 : actor.Pose == Pose.Throw ? -74 : -51 + step * 6;
-        var reach = actor.Pose == Pose.Throw ? 43 : 31;
+        var arm = actor.Pose switch
+        {
+            Pose.React or Pose.Hang => -88,
+            Pose.Throw => -74,
+            Pose.PickUp => -7,
+            _ => -51 + step * 6
+        };
+        var reach = actor.Pose is Pose.Throw or Pose.PickUp ? 43 : 31;
         Line(g, twig, 3.5f, 15, -53, reach, arm);
         Line(g, twig, 2, reach - 2, arm + 2, reach + 5, arm - 4);
 
@@ -291,7 +299,7 @@ internal static class YardArt
         Ellipse(g, dark, 7, -78, 2.5f, 2.5f);
         Ellipse(g, dark, 11, -77, 2.5f, 2.5f);
         if (!actor.NoHat)
-            Hat(g, new(0, -102), 1, 0);
+            Hat(g, new(0, -SnowmanHatHeight), 1, 0);
         Ellipse(g, scarf, -20, -75, 41, 11);
         Poly(g, scarf, new(-11, -68), new(0, -68), new(-6 + step * 3, -48), new(-18 + step * 3, -49));
         Ellipse(g, dark, 6, -56, 4.5f, 4.5f);

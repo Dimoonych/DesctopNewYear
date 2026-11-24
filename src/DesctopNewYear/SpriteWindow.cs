@@ -17,6 +17,7 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
     private bool dragging;
 
     public event Action<Point>? Clicked;
+    public event Func<Point, bool>? BeginDrag;
     public event Action<Point>? Dragged;
     public event Action<Point>? Dropped;
     public event Action? CaptureLost;
@@ -116,13 +117,20 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
         if (Native.GetAsyncKeyState(primaryButton) < 0)
             Dragged?.Invoke(Cursor.Position);
         else
-            EndDrag();
+            EndDrag(Cursor.Position);
     }
 
-    private void EndDrag()
+    private void EndDrag(Point cursor)
     {
         dragging = false;
-        Dropped?.Invoke(Cursor.Position);
+        Dropped?.Invoke(cursor);
+    }
+
+    private Point ScreenPoint(nint coordinates)
+    {
+        var point = new Native.NativePoint(unchecked((short)(long)coordinates),
+            unchecked((short)((long)coordinates >> 16)));
+        return Native.ClientToScreen(Handle, ref point) ? new Point(point.X, point.Y) : Cursor.Position;
     }
 
     private void Hide()
@@ -147,11 +155,16 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
                 message.Result = 3; // MA_NOACTIVATE
                 return;
             case 0x201: // WM_LBUTTONDOWN
-                dragging = owl;
-                Clicked?.Invoke(Cursor.Position);
+                var cursor = ScreenPoint(message.LParam);
+                dragging = BeginDrag?.Invoke(cursor) == true;
+                if (!dragging)
+                    Clicked?.Invoke(cursor);
+                return;
+            case 0x200 when dragging: // WM_MOUSEMOVE
+                Dragged?.Invoke(ScreenPoint(message.LParam));
                 return;
             case 0x202 when dragging: // WM_LBUTTONUP
-                EndDrag();
+                EndDrag(ScreenPoint(message.LParam));
                 return;
             default:
                 base.WndProc(ref message);

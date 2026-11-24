@@ -1,12 +1,14 @@
 namespace DesctopNewYear;
 
-internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw }
+internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp }
 
 internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int Direction, int Toy, float Time,
     bool NoHat = false, bool HoldingHat = false, bool Plowing = false)
 {
     public int ArtWidth => Pose == Pose.Tractor ? 214 : Owl ? 108 : 128;
     public int ArtHeight => Pose == Pose.Tractor ? 122 : Owl ? 99 : 139;
+    public float WalkStep => Pose == Pose.Walk ? MathF.Sin(Time * 14) : 0;
+    public float Bob => Math.Abs(WalkStep) * 2.5f;
 
     public Rectangle Footprint(float scale, Point origin)
     {
@@ -39,7 +41,7 @@ internal sealed class YardScene
     private enum SnowmanAction
     {
         Rest, WalkAround, Inspect, Leave, Away, Carry, Hang, Return, ToPath, Clean,
-        FetchTractor, TractorAway, Plow, DriveOut, FindHat
+        FetchTractor, TractorAway, Plow, DriveOut, FindHat, PickHat
     }
     private enum OwlAction { Roam, Steal, ReturnToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow }
     private enum Chore { Walk, Tree, Lantern }
@@ -58,9 +60,13 @@ internal sealed class YardScene
     private bool askedForPerch, visibleDeparture;
     private double nextWindowVisit;
     private bool hatMissing, owlHasHat;
+    private bool hatGrabbed, hatDragged;
+    private SnowmanAction afterHat = SnowmanAction.Return;
     private int plowed, snowballsLeft;
-    private float hatFall, shotAge, throwPose;
+    private float hatFall, hatFallDuration, hatSpin, shotAge, throwPose;
     private PointF strollStop, hatTarget, hatFallOrigin, shotStart, shotTarget;
+    private Point hatPress;
+    private PointF hatPressPosition, grabbedHat;
     private Chore chore;
     private float snowfall, smoke, powder;
     private bool settled, askedToClean, mouseDown, owlDragged, swayUsed;
@@ -77,7 +83,7 @@ internal sealed class YardScene
         (CurrentPerch is { } perch && Distance(owl, perch.Feet) < 153 * Layout.Scale ||
          owlAction == OwlAction.LeaveWindow && visibleDeparture && owlFlight > 0 && owlTime < .65f);
     public bool InMotion => snowmanAction is not (SnowmanAction.Rest or SnowmanAction.Away) ||
-        snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown || CurrentPerch.HasValue ||
+        snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown || hatGrabbed || CurrentPerch.HasValue ||
         Snowing || Smoking || PowderFalling;
 
     public YardScene(YardSettings settings, YardLayout layout, Random? random = null)
@@ -107,8 +113,11 @@ internal sealed class YardScene
         stolen = -1;
         mouseDown = owlDragged = false;
         hatMissing = owlHasHat = false;
+        hatGrabbed = hatDragged = false;
         hatFall = shotAge = throwPose = 0;
-        if (snowmanAction is SnowmanAction.FindHat or SnowmanAction.WalkAround or SnowmanAction.Inspect)
+        if (snowmanAction is SnowmanAction.FindHat or SnowmanAction.PickHat)
+            FinishHatRecovery();
+        else if (snowmanAction is SnowmanAction.WalkAround or SnowmanAction.Inspect)
             SetSnowman(SnowmanAction.Rest);
     }
 
@@ -123,6 +132,7 @@ internal sealed class YardScene
             {
                 SnowmanAction.Plow or SnowmanAction.DriveOut => Pose.Tractor,
                 SnowmanAction.FindHat when throwPose > 0 => Pose.Throw,
+                SnowmanAction.PickHat => Pose.PickUp,
                 _ when snowmanReaction > 0 => Pose.React,
                 SnowmanAction.Clean => powder > .5f ? Pose.Rest : Pose.Shovel,
                 SnowmanAction.Hang => Pose.Hang,
@@ -213,6 +223,80 @@ internal sealed class YardScene
             StartWalk();
     }
 
+    public bool TryGrabHat(Point cursor)
+    {
+        if (hatMissing || hatGrabbed || owlAction == OwlAction.TakeHat ||
+            Snowman is not { Pose: not Pose.Tractor } actor)
+            return false;
+
+        var scale = Layout.Scale;
+        var brim = new PointF(actor.Feet.X, actor.Feet.Y - (YardArt.SnowmanHatHeight + actor.Bob) * scale);
+        if (Math.Abs(cursor.X - brim.X) > 26 * scale ||
+            cursor.Y < brim.Y - 24 * scale || cursor.Y > brim.Y + 4 * scale)
+            return false;
+
+        hatGrabbed = true;
+        hatPress = cursor;
+        hatPressPosition = brim;
+        return true;
+    }
+
+    public void DragGrabbedHat(Point cursor)
+    {
+        var dx = cursor.X - hatPress.X;
+        var dy = cursor.Y - hatPress.Y;
+        if (!hatGrabbed || !hatDragged && Math.Abs(dx) + Math.Abs(dy) < 5)
+            return;
+
+        hatDragged = hatMissing = true;
+        var work = Layout.Work;
+        var scale = Layout.Scale;
+        grabbedHat = new(
+            Math.Clamp(hatPressPosition.X + dx, work.Left + 27 * scale, work.Right - 27 * scale),
+            Math.Clamp(hatPressPosition.Y + dy, work.Top + 26 * scale, work.Bottom - 5 * scale));
+    }
+
+    public void DropGrabbedHat(Point cursor)
+    {
+        if (!hatGrabbed)
+            return;
+
+        DragGrabbedHat(cursor);
+        if (!hatDragged)
+        {
+            hatGrabbed = false;
+            GreetSnowman();
+            return;
+        }
+
+        ReleaseGrabbedHat();
+    }
+
+    public void ReleaseGrabbedHat()
+    {
+        hatGrabbed = false;
+        if (!hatDragged)
+            return;
+
+        hatDragged = false;
+        afterHat = snowmanAction switch
+        {
+            SnowmanAction.FetchTractor => SnowmanAction.FetchTractor,
+            SnowmanAction.ToPath or SnowmanAction.Clean => SnowmanAction.ToPath,
+            SnowmanAction.Leave => SnowmanAction.Leave,
+            _ when held >= 0 => SnowmanAction.Carry,
+            _ => SnowmanAction.Return
+        };
+        var landing = new PointF(grabbedHat.X, Layout.Home.Y);
+        var distance = landing.Y - grabbedHat.Y;
+        var origin = distance > 0 ? grabbedHat : landing;
+        var duration = distance > 0 ? Math.Clamp(MathF.Sqrt(2 * distance / (1010 * Layout.Scale)), .12f, 1.1f) : 0;
+        BeginHatFall(origin, landing, duration, spin: 34);
+        snowballsLeft = 0;
+        snowmanReaction = 0;
+        SetSnowman(SnowmanAction.FindHat);
+    }
+
     public void TouchOwl(Point cursor)
     {
         mouseDown = true;
@@ -265,7 +349,8 @@ internal sealed class YardScene
     public void Advance(float seconds, Daylight daylight, DateTime localTime, WindowPerch? window = null)
     {
         time += seconds;
-        snowmanTime += seconds;
+        if (!hatGrabbed)
+            snowmanTime += seconds;
         snowmanReaction = Math.Max(0, snowmanReaction - seconds);
         owlReaction = Math.Max(0, owlReaction - seconds);
         powder = Math.Max(0, powder - seconds);
@@ -304,7 +389,7 @@ internal sealed class YardScene
 
     private void AdvanceSnowman(float seconds, bool late)
     {
-        if (owlAction == OwlAction.TakeHat && owlFlight > 0)
+        if (hatGrabbed || owlAction == OwlAction.TakeHat && owlFlight > 0)
             return;
 
         var free = snowmanAction is SnowmanAction.Rest or SnowmanAction.Return or
@@ -392,6 +477,9 @@ internal sealed class YardScene
             case SnowmanAction.FindHat:
                 AdvanceChase(seconds);
                 break;
+            case SnowmanAction.PickHat when snowmanTime >= .52f:
+                FinishHatRecovery();
+                break;
         }
     }
 
@@ -445,9 +533,18 @@ internal sealed class YardScene
             snowballsLeft > 0 || shotAge > 0)
             return;
 
+        SetSnowman(SnowmanAction.PickHat);
+    }
+
+    private void FinishHatRecovery()
+    {
         hatMissing = false;
         snowmanReaction = .7f;
-        SetSnowman(SnowmanAction.Return);
+        var next = afterHat;
+        if (next == SnowmanAction.ToPath && settings.Snow == 0)
+            next = held >= 0 ? SnowmanAction.Carry : SnowmanAction.Return;
+        SetSnowman(next);
+        afterHat = SnowmanAction.Return;
     }
 
     private bool WalkTo(PointF target, float seconds, int speed = 168)
@@ -530,7 +627,7 @@ internal sealed class YardScene
                 FlyTo(Layout.Branch, OwlAction.ShakeBranch);
             return;
         }
-        var canStealHat = !hatMissing && stolen < 0 && settings.Snow < 3 &&
+        var canStealHat = !hatMissing && !hatGrabbed && stolen < 0 && settings.Snow < 3 &&
             snowmanAction is SnowmanAction.Rest or SnowmanAction.Inspect or SnowmanAction.WalkAround or SnowmanAction.Return;
         if (canStealHat && (askedForHat || time >= nextHatTheft))
         {
@@ -610,6 +707,7 @@ internal sealed class YardScene
     private void BeginChase()
     {
         hatMissing = owlHasHat = true;
+        afterHat = SnowmanAction.Return;
         snowballsLeft = 3;
         nextShot = time + .45;
         nextHatTheft = time + random.Next(80, 135);
@@ -629,8 +727,15 @@ internal sealed class YardScene
             hatTarget = new(Math.Clamp(owl.X, work.Left + 45, work.Right - 45),
                 Math.Clamp(owl.Y + 130 * Layout.Scale, work.Top + work.Height * .71f, work.Bottom - 30));
         }
-        hatFallOrigin = new(owl.X, owl.Y - 30 * Layout.Scale);
-        hatFall = .65f;
+        BeginHatFall(new(owl.X, owl.Y - 30 * Layout.Scale), hatTarget, .65f, spin: 190);
+    }
+
+    private void BeginHatFall(PointF origin, PointF landing, float duration, float spin)
+    {
+        hatFallOrigin = origin;
+        hatTarget = landing;
+        hatFall = hatFallDuration = duration;
+        hatSpin = spin;
     }
 
     public PrankFrame Prank
@@ -638,10 +743,22 @@ internal sealed class YardScene
         get
         {
             PointF? hat = null, projectile = null;
+            var angle = 0f;
             if (hatMissing && !owlHasHat)
             {
-                var fall = 1 - hatFall / .65f;
-                hat = Lerp(hatFallOrigin, hatTarget, fall * fall);
+                if (hatDragged)
+                {
+                    hat = grabbedHat;
+                    angle = -12;
+                }
+                else if (hatFall > 0)
+                {
+                    var fall = 1 - hatFall / hatFallDuration;
+                    hat = Lerp(hatFallOrigin, hatTarget, fall * fall);
+                    angle = -(1 - fall) * hatSpin;
+                }
+                else
+                    hat = hatTarget;
             }
             if (shotAge > 0)
             {
@@ -650,7 +767,7 @@ internal sealed class YardScene
                 point.Y -= MathF.Sin(progress * MathF.PI) * 53 * Layout.Scale;
                 projectile = point;
             }
-            return new(hat, -hatFall * 295, projectile);
+            return new(hat, angle, projectile);
         }
     }
 

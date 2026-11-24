@@ -99,6 +99,8 @@ internal static class Native
     [DllImport("user32.dll")]
     internal static extern bool ScreenToClient(nint window, ref NativePoint point);
     [DllImport("user32.dll")]
+    internal static extern bool ClientToScreen(nint window, ref NativePoint point);
+    [DllImport("user32.dll")]
     internal static extern bool InvalidateRect(nint window, ref NativeRect rectangle, bool erase);
     [DllImport("user32.dll")]
     internal static extern nint BeginPaint(nint window, out Paint paint);

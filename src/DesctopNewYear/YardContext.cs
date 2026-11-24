@@ -179,6 +179,7 @@ internal sealed class YardContext : ApplicationContext
         }
 
         var now = DateTime.Now;
+        snowman?.UpdateDrag();
         owl?.UpdateDrag();
         if (!paused && !fullscreen)
             scene.Advance(seconds, Daylight.At(now, settings), now, PickPerch());
@@ -224,7 +225,21 @@ internal sealed class YardContext : ApplicationContext
             owl = new SpriteWindow(owl: true, wallpaper.IconHost);
             visitingOwl = new SpriteWindow(owl: true, desktop: 0);
             snowman.Clicked += _ => Run(scene.GreetSnowman);
-            owl.Clicked += cursor => Run(() => scene.TouchOwl(cursor));
+            snowman.BeginDrag += cursor =>
+            {
+                if (!scene.TryGrabHat(cursor))
+                    return false;
+                Tick();
+                return true;
+            };
+            snowman.Dragged += scene.DragGrabbedHat;
+            snowman.Dropped += scene.DropGrabbedHat;
+            snowman.CaptureLost += scene.ReleaseGrabbedHat;
+            owl.BeginDrag += cursor =>
+            {
+                Run(() => scene.TouchOwl(cursor));
+                return true;
+            };
             owl.Dragged += scene.DragOwl;
             owl.Dropped += _ => scene.DropOwl();
             owl.CaptureLost += scene.CancelDrag;
