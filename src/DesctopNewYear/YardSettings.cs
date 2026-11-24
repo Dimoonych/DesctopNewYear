@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DesctopNewYear;
 
@@ -15,7 +16,11 @@ internal sealed class YardSettings
     public int Ornaments { get; set; }
     public int MissingOrnament { get; set; } = -1;
     public int Snow { get; set; }
+    public Miniature[] Miniatures { get; set; } = [];
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int MiniSnowmanSize { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool MiniSnowmanHat { get; set; }
 
     public static YardSettings Load()
@@ -23,24 +28,33 @@ internal sealed class YardSettings
         try
         {
             using var input = File.OpenRead(PathToSettings);
-            var settings = JsonSerializer.Deserialize<YardSettings>(input) ?? new();
-            settings.Dusk = Math.Clamp(settings.Dusk, 10 * 60, 22 * 60);
-            settings.LightsOff = Math.Clamp(settings.LightsOff, settings.Dusk + 60, 1439);
-            settings.Ornaments = Math.Clamp(settings.Ornaments, 0, 7);
-            if (settings.MissingOrnament < 0 || settings.MissingOrnament >= Math.Min(settings.Ornaments, 6))
-                settings.MissingOrnament = -1;
-            settings.Snow = Math.Clamp(settings.Snow, 0, 3);
-            if (settings.MiniSnowmanSize is < 22 or > 30)
-            {
-                settings.MiniSnowmanSize = 0;
-                settings.MiniSnowmanHat = false;
-            }
-            return settings;
+            return Read(input);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return new();
         }
+    }
+
+    internal static YardSettings Read(Stream input)
+    {
+        var settings = JsonSerializer.Deserialize<YardSettings>(input) ?? new();
+        settings.Dusk = Math.Clamp(settings.Dusk, 10 * 60, 22 * 60);
+        settings.LightsOff = Math.Clamp(settings.LightsOff, settings.Dusk + 60, 1439);
+        settings.Ornaments = Math.Clamp(settings.Ornaments, 0, 7);
+        if (settings.MissingOrnament < 0 || settings.MissingOrnament >= Math.Min(settings.Ornaments, 6))
+            settings.MissingOrnament = -1;
+        settings.Snow = Math.Clamp(settings.Snow, 0, 3);
+        settings.Miniatures = (settings.Miniatures ?? [])
+            .Where(figure => figure is { Slot: >= 0 and < YardLayout.MiniatureSlots, Size: >= 22 and <= 30,
+                Snowfalls: >= 0 and < Miniature.BurialLimit })
+            .DistinctBy(figure => figure.Slot)
+            .ToArray();
+        if (settings.Miniatures.Length == 0 && settings.MiniSnowmanSize is >= 22 and <= 30)
+            settings.Miniatures = [new Miniature(0, settings.MiniSnowmanSize, settings.MiniSnowmanHat)];
+        settings.MiniSnowmanSize = 0;
+        settings.MiniSnowmanHat = false;
+        return settings;
     }
 
     public bool Save()
@@ -58,6 +72,11 @@ internal sealed class YardSettings
             return false;
         }
     }
+}
+
+internal sealed record Miniature(int Slot, int Size, bool HasHat, int Snowfalls = 0)
+{
+    public const int BurialLimit = 3;
 }
 
 internal readonly record struct Daylight(int Shade, bool WindowLit, bool LanternLit)

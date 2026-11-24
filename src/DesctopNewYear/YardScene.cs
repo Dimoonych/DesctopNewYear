@@ -94,6 +94,7 @@ internal sealed class YardScene
     private float miniRadius;
     private PointF miniBall, miniDragOffset;
     private double nextMiniHat = 8;
+    private int miniSlot, miniHatSlot = -1;
 
     public YardLayout Layout { get; private set; }
     public bool Snowing => snowfall > 0;
@@ -122,6 +123,13 @@ internal sealed class YardScene
 
     public void SetLayout(YardLayout layout)
     {
+        if (Layout.View == layout.View)
+        {
+            Layout = layout;
+            if (miniStage == MiniStage.Parked)
+                miniBall = MiniStand;
+            return;
+        }
         Layout = layout;
         miniGrabbed = false;
         if (miniStage == MiniStage.Shaping)
@@ -129,7 +137,7 @@ internal sealed class YardScene
             miniStage = MiniStage.Loose;
             miniRadius = 16;
         }
-        miniBall = miniStage == MiniStage.Parked ? layout.MiniStand : layout.Home;
+        miniBall = miniStage == MiniStage.Parked ? MiniStand : layout.Home;
         if (BuildingMiniature)
             SetSnowman(SnowmanAction.Return);
         snowman = snowmanAction is SnowmanAction.Away or SnowmanAction.Carry or
@@ -142,6 +150,7 @@ internal sealed class YardScene
         owl = layout.Roof;
         owlFlight = 0;
         owlAction = OwlAction.Roam;
+        miniHatSlot = -1;
         owlAway = false;
         CurrentPerch = null;
         stolen = -1;
@@ -200,7 +209,9 @@ internal sealed class YardScene
         new ActorFrame(miniBall, false, Pose.RollableSnow, 1, -1, 0,
             Snowball: miniStage == MiniStage.Shaping ? 5 + 11 * Math.Clamp(snowmanTime / 1.2f, 0, 1) : miniRadius);
     public ActorFrame? RollableBall => miniStage == MiniStage.Loose ? LooseSnowball : null;
-    public PointF? MiniatureTarget => miniStage == MiniStage.Loose ? Layout.MiniStand : null;
+    public PointF? MiniatureTarget => miniStage == MiniStage.Loose ? MiniStand : null;
+    public bool CanBuildMiniature => miniStage == MiniStage.Empty && settings.Miniatures.Length < YardLayout.MiniatureSlots;
+    private PointF MiniStand => Layout.MiniatureStand(miniSlot);
     private float MiniHeadRadius => miniRadius * .62f;
     private bool BuildingMiniature => snowmanAction is SnowmanAction.ShapeBase or SnowmanAction.GoForHead or
         SnowmanAction.ShapeHead or SnowmanAction.CarryHead or SnowmanAction.StackHead;
@@ -282,7 +293,7 @@ internal sealed class YardScene
 
     public void ClickSnowman()
     {
-        if (settings.MiniSnowmanSize == 0 && miniStage == MiniStage.Empty)
+        if (CanBuildMiniature)
         {
             askedForMini = true;
             if (SnowmanFree)
@@ -327,10 +338,10 @@ internal sealed class YardScene
 
         RollSnowball(cursor);
         miniGrabbed = false;
-        if (Distance(miniBall, Layout.MiniStand) > 112 * Layout.Scale)
+        if (Distance(miniBall, MiniStand) > 76 * Layout.Scale)
             return;
 
-        miniBall = Layout.MiniStand;
+        miniBall = MiniStand;
         miniRadius = Math.Max(22, miniRadius);
         miniStage = MiniStage.Parked;
     }
@@ -436,8 +447,10 @@ internal sealed class YardScene
             Math.Clamp(cursor.Y + dragOffset.Y, area.Top + 50, area.Bottom - 10));
     }
 
-    public void DropOwl()
+    public void DropOwl(Point? cursor = null)
     {
+        if (cursor is { } finalPosition)
+            DragOwl(finalPosition);
         mouseDown = false;
         if (!owlDragged)
             return;
@@ -493,6 +506,11 @@ internal sealed class YardScene
             if (snowfall <= 6 && !settled)
             {
                 settings.Snow = Math.Min(3, settings.Snow + 1);
+                if (settings.Miniatures.Any(figure => figure.HasHat))
+                    settings.Miniatures = settings.Miniatures
+                        .Select(figure => figure.HasHat ? figure with { Snowfalls = figure.Snowfalls + 1 } : figure)
+                        .Where(figure => figure.Snowfalls < Miniature.BurialLimit)
+                        .ToArray();
                 settled = true;
             }
             if (!Snowing)
@@ -531,7 +549,7 @@ internal sealed class YardScene
             snowmanReaction = 0;
             SetSnowman(SnowmanAction.GoForHead);
         }
-        else if (SnowmanFree && askedForMini && miniStage == MiniStage.Empty)
+        else if (SnowmanFree && askedForMini && CanBuildMiniature)
             ShapeSnowball();
 
         if (snowmanReaction > 0)
@@ -634,14 +652,13 @@ internal sealed class YardScene
             case SnowmanAction.ShapeHead when snowmanTime >= 1.2f:
                 SetSnowman(SnowmanAction.CarryHead);
                 break;
-            case SnowmanAction.CarryHead when WalkTo(Layout.MiniStand with
-                { X = Layout.MiniStand.X + 53 * Layout.Scale }, seconds, 132):
+            case SnowmanAction.CarryHead when WalkTo(MiniStand with
+                { X = MiniStand.X + 53 * Layout.Scale }, seconds, 132):
                 direction = -1;
                 SetSnowman(SnowmanAction.StackHead);
                 break;
             case SnowmanAction.StackHead when snowmanTime >= 1.6f:
-                settings.MiniSnowmanSize = (int)MathF.Round(miniRadius);
-                settings.MiniSnowmanHat = false;
+                settings.Miniatures = [..settings.Miniatures, new Miniature(miniSlot, (int)MathF.Round(miniRadius), false)];
                 nextMiniHat = time + 6;
                 miniStage = MiniStage.Empty;
                 SetSnowman(SnowmanAction.Return);
@@ -654,6 +671,8 @@ internal sealed class YardScene
         askedForMini = false;
         snowmanReaction = 0;
         direction = -1;
+        miniSlot = Enumerable.Range(0, YardLayout.MiniatureSlots)
+            .First(slot => settings.Miniatures.All(figure => figure.Slot != slot));
         var scale = Layout.Scale;
         miniBall = new(Math.Clamp(snowman.X - 48 * scale, Layout.Work.Left + 34 * scale,
             Layout.Work.Right - 34 * scale), snowman.Y);
@@ -800,11 +819,11 @@ internal sealed class YardScene
             if (time >= nextOwl)
             {
                 owlAway = false;
-                owl = RightEdge;
                 if (owlAction == OwlAction.FetchMiniHat)
                 {
-                    var stand = Layout.MiniStand;
-                    var size = settings.MiniSnowmanSize;
+                    var figure = settings.Miniatures.First(item => item.Slot == miniHatSlot);
+                    var stand = Layout.MiniatureStand(figure.Slot);
+                    var size = figure.Size;
                     var height = 2 * size + size * .62f * 1.46f;
                     FlyTo(new(stand.X - 8 * Layout.Scale, stand.Y - (height - 29) * Layout.Scale),
                         OwlAction.DeliverMiniHat, speed: 238, maxDuration: 7.5f);
@@ -820,7 +839,7 @@ internal sealed class YardScene
 
         if (owlFlight > 0)
         {
-            owlTime += seconds;
+            owlTime += Math.Min(seconds, .085f);
             owl = FlightPoint(owlTime);
             if (owlTime < owlFlight)
                 return;
@@ -838,9 +857,10 @@ internal sealed class YardScene
             return;
         }
 
-        if (settings.MiniSnowmanSize > 0 && !settings.MiniSnowmanHat && time >= nextMiniHat &&
-            !hatMissing && stolen < 0)
+        if (time >= nextMiniHat && !hatMissing && stolen < 0 &&
+            settings.Miniatures.FirstOrDefault(figure => !figure.HasHat) is { } waiting)
         {
+            miniHatSlot = waiting.Slot;
             nextMiniHat = time + 12;
             FlyTo(RightEdge, OwlAction.FetchMiniHat);
             return;
@@ -897,17 +917,18 @@ internal sealed class YardScene
     private PointF FlightPoint(float elapsed)
     {
         var progress = Math.Min(1, elapsed / owlFlight);
-        var point = Lerp(owlStart, owlTarget, progress);
+        var eased = progress * progress * (3 - 2 * progress);
+        var point = Lerp(owlStart, owlTarget, eased);
         point.Y -= MathF.Sin(progress * MathF.PI) * 75 * Layout.Scale;
         return point;
     }
 
-    private void FlyTo(PointF target, OwlAction action, int speed = 355, float maxDuration = 2.7f)
+    private void FlyTo(PointF target, OwlAction action, int speed = 255, float maxDuration = 6.3f)
     {
         owlStart = owl;
         owlTarget = target;
         owlTime = 0;
-        owlFlight = Math.Clamp(Distance(owl, target) / (speed * Layout.Scale), .45f, maxDuration);
+        owlFlight = Math.Clamp(Distance(owl, target) / (speed * Layout.Scale), .85f, maxDuration);
         owlAction = action;
     }
 
@@ -927,7 +948,10 @@ internal sealed class YardScene
                 nextOwl = time + random.Next(4, 7);
                 break;
             case OwlAction.DeliverMiniHat:
-                settings.MiniSnowmanHat = true;
+                settings.Miniatures = settings.Miniatures.Select(figure =>
+                    figure.Slot == miniHatSlot ? figure with { HasHat = true } : figure).ToArray();
+                miniHatSlot = -1;
+                nextMiniHat = time + 8;
                 FlyTo(Layout.Roof, OwlAction.Roam);
                 break;
             case OwlAction.Leave:

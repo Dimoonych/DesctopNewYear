@@ -5,6 +5,7 @@ namespace DesctopNewYear;
 
 internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
 {
+    public const int MiniatureSlots = 4;
     public float Scale => Math.Clamp(Math.Min(View.Width / 1440f, View.Height / 900f), .46f, 1.65f);
     public PointF Anchor => new(View.Width - 64 * Scale,
         Math.Min(View.Height - 103 * Scale, Work.Bottom - View.Y - 57 * Scale));
@@ -24,7 +25,17 @@ internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
     public Rectangle SnowArea => new(Point.Empty, View.Size);
     public PointF PondBench => new(View.Width * .265f + Math.Min(View.Width * .163f, 285 * Scale) * .75f,
         Anchor.Y + 18 * Scale);
-    public PointF MiniStand => new(View.X + PondBench.X + 73 * Scale, View.Y + PondBench.Y + 9 * Scale);
+    public PointF MiniatureStand(int slot)
+    {
+        var (x, y) = slot switch
+        {
+            0 => (73, 9),
+            1 => (-92, 17),
+            2 => (178, 2),
+            _ => (-197, 8)
+        };
+        return new(View.X + PondBench.X + x * Scale, View.Y + PondBench.Y + y * Scale);
+    }
 }
 
 internal static class YardArt
@@ -44,7 +55,7 @@ internal static class YardArt
         layout.Screen(-393 + Branches[index].X, Branches[index].Y);
 
     public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int snow, int missing = -1,
-        int miniature = 0, bool miniHat = false)
+        IReadOnlyList<Miniature>? miniatures = null)
     {
         var bitmap = new Bitmap(layout.View.Width, layout.View.Height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(bitmap);
@@ -62,13 +73,14 @@ internal static class YardArt
         DrawMountains(graphics, w, h, dark);
         DrawForest(graphics, w, h, layout.Scale, dark);
         DrawGround(graphics, w, h, dark);
-        DrawMeadow(graphics, layout, dark);
-        if (miniature > 0)
+        DrawMeadow(graphics, layout, dark, snow);
+        foreach (var miniature in miniatures ?? [])
         {
             var saved = graphics.Save();
-            graphics.TranslateTransform(layout.MiniStand.X - layout.View.X, layout.MiniStand.Y - layout.View.Y);
+            var stand = layout.MiniatureStand(miniature.Slot);
+            graphics.TranslateTransform(stand.X - layout.View.X, stand.Y - layout.View.Y);
             graphics.ScaleTransform(layout.Scale, layout.Scale);
-            DrawMiniSnowman(graphics, miniature, miniHat);
+            DrawMiniSnowman(graphics, miniature, dark);
             graphics.Restore(saved);
         }
 
@@ -176,7 +188,7 @@ internal static class YardArt
         g.DrawBezier(drift, w * .12f, h * .96f, w * .23f, h * .90f, w * .33f, h * .99f, w * .37f, h * .95f);
     }
 
-    private static void DrawMeadow(Graphics g, YardLayout layout, float dark)
+    private static void DrawMeadow(Graphics g, YardLayout layout, float dark, int snow)
     {
         var scale = layout.Scale;
         var w = layout.View.Width;
@@ -230,6 +242,9 @@ internal static class YardArt
         DrawMeadowSpruce(g, w * .43f, h * .746f, 96 * scale, 31 * scale, dark);
         DrawMeadowSpruce(g, w * .46f, h * .773f, 130 * scale, 40 * scale, dark);
         DrawBench(g, layout.PondBench, scale, iceEdge, dark);
+        if (snow >= 2)
+            DrawSnowBank(g, w * .14f, pathY + 16 * scale, (121 + 20 * snow) * scale, (18 + 10 * snow) * scale,
+                Mix(C("#8daebc"), C("#496782"), dark), iceEdge);
     }
 
     private static void DrawMeadowSpruce(Graphics g, float x, float y, float height, float half, float dark)
@@ -388,18 +403,35 @@ internal static class YardArt
 
     private static void DrawDrifts(Graphics g, int snow, Color ice, Color powder)
     {
-        Ellipse(g, ice, -438, -7, 87, 16);
-        Ellipse(g, powder, -435, -9, 78, 12);
+        DrawSnowBank(g, -405, 7, 105, 17, ice, powder);
         if (snow == 0)
             return;
 
-        Ellipse(g, ice, -391, 8 - snow * 6, 94 + snow * 25, 12 + snow * 9);
-        Ellipse(g, powder, -387, 4 - snow * 6, 86 + snow * 25, 10 + snow * 9);
+        DrawSnowBank(g, -326, 18, 108 + 27 * snow, 21 + 16 * snow, ice, powder);
         if (snow >= 2)
-        {
-            Ellipse(g, ice, -294, 4, 70 + snow * 12, 22);
-            Ellipse(g, powder, -293, 1, 66 + snow * 12, 18);
-        }
+            DrawSnowBank(g, -493, 28, 109 + 19 * snow, 17 + 10 * snow, ice, powder);
+        if (snow == 3)
+            DrawSnowBank(g, -197, 23, 151, 53, ice, powder);
+    }
+
+    private static void DrawSnowBank(Graphics g, float x, float y, float width, float height, Color ice, Color snow)
+    {
+        var left = x - width / 2;
+        var right = x + width / 2;
+        using var contour = new GraphicsPath();
+        contour.AddBezier(left, y, left + width * .14f, y - height * .18f, x - width * .27f,
+            y - height, x - width * .06f, y - height * .96f);
+        contour.AddBezier(x - width * .06f, y - height * .96f, x + width * .16f, y - height * .88f,
+            right - width * .14f, y - height * .37f, right, y);
+        contour.AddBezier(right, y, x + width * .24f, y + height * .19f, x - width * .25f,
+            y + height * .14f, left, y);
+        contour.CloseFigure();
+        using var fill = new LinearGradientBrush(new RectangleF(left, y - height, width, height * 1.18f),
+            snow, ice, 90);
+        g.FillPath(fill, contour);
+        using var rim = new Pen(Color.FromArgb(100, snow), Math.Max(1, height * .04f));
+        g.DrawBezier(rim, left + width * .15f, y - height * .33f, x - width * .20f, y - height * .69f,
+            x - width * .074f, y - height * .88f, x + width * .04f, y - height * .74f);
     }
 
     public static void Snowman(Graphics g, ActorFrame actor)
@@ -490,8 +522,9 @@ internal static class YardArt
             radius * .20f, radius * .14f);
     }
 
-    private static void DrawMiniSnowman(Graphics g, float body, bool hat)
+    private static void DrawMiniSnowman(Graphics g, Miniature miniature, float dark)
     {
+        var body = miniature.Size;
         var head = body * .62f;
         var face = -2 * body - head * .64f;
         var coal = C("#43536b");
@@ -507,8 +540,14 @@ internal static class YardArt
         using (var smile = new Pen(coal, Math.Max(1, head * .075f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             g.DrawArc(smile, -head * .31f, face - head * .03f, head * .62f, head * .47f, 15, 150);
         Ellipse(g, coal, -body * .06f, -body * 1.06f, body * .15f, body * .15f);
-        if (hat)
+        if (miniature.HasHat)
             Hat(g, new(0, face - head * .77f), .46f + body / 220f, -7);
+        if (miniature.Snowfalls > 0)
+        {
+            var height = body * (miniature.Snowfalls == 1 ? .82f : 2.04f);
+            DrawSnowBank(g, body * .19f, 4, body * 3.3f, height,
+                Mix(C("#a5bdcc"), C("#58728d"), dark), Mix(C("#eff5f5"), C("#c0d5e6"), dark));
+        }
     }
 
     public static void DrawSnowballTarget(Graphics g, PointF feet, float scale)

@@ -22,9 +22,9 @@ internal sealed class YardContext : ApplicationContext
     private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
-    private (int Ornaments, int Snow, int MissingOrnament, int MiniSize, bool MiniHat) saved;
-    private (int Ornaments, int Snow, int MissingOrnament, int MiniSize, bool MiniHat) Progress =>
-        (settings.Ornaments, settings.Snow, settings.MissingOrnament, settings.MiniSnowmanSize, settings.MiniSnowmanHat);
+    private (int Ornaments, int Snow, int MissingOrnament, Miniature[] Miniatures) saved;
+    private (int Ornaments, int Snow, int MissingOrnament, Miniature[] Miniatures) Progress =>
+        (settings.Ornaments, settings.Snow, settings.MissingOrnament, settings.Miniatures);
 
     public YardContext()
     {
@@ -85,8 +85,7 @@ internal sealed class YardContext : ApplicationContext
         {
             pause.Checked = paused;
             wallpaperOnly.Checked = settings.WallpaperOnly;
-            buildMiniature.Enabled = !settings.WallpaperOnly && settings.MiniSnowmanSize == 0 &&
-                scene.LooseSnowball is null;
+            buildMiniature.Enabled = !settings.WallpaperOnly && scene.CanBuildMiniature;
             status.Text = wallpaper is not { Available: true } ? "Фон пока не подключён" :
                 fullscreen ? "Полноэкранный режим" : "Новогодний двор";
             RefreshMonitors();
@@ -251,7 +250,7 @@ internal sealed class YardContext : ApplicationContext
                 return true;
             };
             owl.Dragged += scene.DragOwl;
-            owl.Dropped += _ => scene.DropOwl();
+            owl.Dropped += cursor => scene.DropOwl(cursor);
             owl.CaptureLost += scene.CancelDrag;
             snowball.BeginDrag += cursor =>
             {
