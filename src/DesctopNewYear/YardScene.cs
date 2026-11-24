@@ -492,8 +492,8 @@ internal sealed class YardScene
         {
             Chore.Tree => Layout.Tree,
             Chore.Lantern => Layout.Screen(-489, 11),
-            _ => new(Layout.View.Left + Layout.View.Width * (.25f + random.NextSingle() * .29f),
-                Layout.Home.Y + 8 * Layout.Scale)
+            _ => new(Layout.View.Left + Layout.View.Width * (.19f + random.NextSingle() * .23f),
+                Layout.Home.Y + 23 * Layout.Scale)
         };
         SetSnowman(SnowmanAction.WalkAround);
     }

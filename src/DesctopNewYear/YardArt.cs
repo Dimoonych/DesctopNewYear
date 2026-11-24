@@ -53,8 +53,10 @@ internal static class YardArt
             graphics.FillRectangle(sky, 0, 0, w, h);
 
         DrawSky(graphics, w, h, dark);
+        DrawMountains(graphics, w, h, dark);
         DrawForest(graphics, w, h, layout.Scale, dark);
         DrawGround(graphics, w, h, dark);
+        DrawMeadow(graphics, layout, dark);
 
         graphics.TranslateTransform(layout.Anchor.X, layout.Anchor.Y);
         graphics.ScaleTransform(layout.Scale, layout.Scale);
@@ -81,6 +83,39 @@ internal static class YardArt
             moon.Y - radius, radius * 2, radius * 2);
         Ellipse(g, Color.FromArgb((int)(47 * dark), C("#c4a999")), moon.X - radius * .47f,
             moon.Y + 1, radius * .45f, radius * .29f);
+
+        using var cloud = new SolidBrush(Color.FromArgb((int)(77 - 52 * dark), C("#e8e4e5")));
+        SkyRibbon(g, cloud, w * .08f, h * .25f, w * .39f, h * .041f);
+        SkyRibbon(g, cloud, w * .48f, h * .34f, w * .39f, h * .028f);
+    }
+
+    private static void SkyRibbon(Graphics g, Brush fill, float x, float y, float length, float height)
+    {
+        using var ribbon = new GraphicsPath();
+        ribbon.AddBezier(x, y + height, x + length * .25f, y - height * .55f,
+            x + length * .39f, y - height * .16f, x + length, y + height * .40f);
+        ribbon.AddBezier(x + length, y + height * .40f, x + length * .68f, y + height * .62f,
+            x + length * .31f, y + height * .18f, x, y + height);
+        g.FillPath(fill, ribbon);
+    }
+
+    private static void DrawMountains(Graphics g, int w, int h, float dark)
+    {
+        var ridge = Mix(C("#b2c1cf"), C("#3b4a66"), dark);
+        var snow = Mix(C("#e2e6e6"), C("#63718c"), dark);
+        Poly(g, ridge,
+            new(0, h * .56f), new(w * .10f, h * .50f), new(w * .23f, h * .403f),
+            new(w * .31f, h * .47f), new(w * .39f, h * .425f), new(w * .54f, h * .56f),
+            new(w * .63f, h * .49f), new(w * .76f, h * .445f), new(w * .91f, h * .53f),
+            new(w, h * .51f), new(w, h * .73f), new(0, h * .73f));
+        Poly(g, snow, new(w * .165f, h * .452f), new(w * .23f, h * .403f),
+            new(w * .286f, h * .45f), new(w * .251f, h * .443f),
+            new(w * .235f, h * .431f), new(w * .202f, h * .465f), new(w * .204f, h * .442f));
+        Poly(g, snow, new(w * .345f, h * .451f), new(w * .39f, h * .425f),
+            new(w * .437f, h * .467f), new(w * .41f, h * .462f),
+            new(w * .386f, h * .448f), new(w * .36f, h * .457f));
+        Poly(g, Color.FromArgb(150, snow), new(w * .715f, h * .463f), new(w * .76f, h * .445f),
+            new(w * .806f, h * .471f), new(w * .775f, h * .466f), new(w * .75f, h * .46f));
     }
 
     private static void DrawForest(Graphics g, int w, int h, float scale, float dark)
@@ -127,6 +162,97 @@ internal static class YardArt
         g.DrawBezier(drift, w * .12f, h * .96f, w * .23f, h * .90f, w * .33f, h * .99f, w * .37f, h * .95f);
     }
 
+    private static void DrawMeadow(Graphics g, YardLayout layout, float dark)
+    {
+        var scale = layout.Scale;
+        var w = layout.View.Width;
+        var h = layout.View.Height;
+        var center = new PointF(w * .265f, layout.Anchor.Y - 66 * scale);
+        var halfWidth = Math.Min(w * .163f, 285 * scale);
+        var halfHeight = 55 * scale;
+        var end = layout.Local(-475, 16);
+        var pathY = layout.Anchor.Y + 34 * scale;
+        using (var trail = new Pen(Mix(C("#acc7d1"), C("#4c6784"), dark), 16 * scale)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round
+        })
+            g.DrawBezier(trail, center.X - halfWidth * .54f, pathY - 9 * scale,
+                w * .33f, pathY + 73 * scale, w * .48f, layout.Anchor.Y - 61 * scale, end.X, end.Y);
+
+        var iceEdge = Mix(C("#ecf4f1"), C("#9db5ca"), dark);
+        var ice = Mix(C("#9dc8d8"), C("#416d8d"), dark);
+        using var pond = new GraphicsPath();
+        pond.AddBezier(center.X - halfWidth, center.Y,
+            center.X - halfWidth * .90f, center.Y - halfHeight * 1.05f,
+            center.X + halfWidth * .50f, center.Y - halfHeight * 1.14f,
+            center.X + halfWidth * .88f, center.Y - halfHeight * .30f);
+        pond.AddBezier(center.X + halfWidth * .88f, center.Y - halfHeight * .30f,
+            center.X + halfWidth * 1.48f, center.Y + halfHeight * .88f,
+            center.X - halfWidth * .77f, center.Y + halfHeight * 1.27f,
+            center.X - halfWidth, center.Y);
+        pond.CloseFigure();
+        using (var surface = new SolidBrush(ice))
+            g.FillPath(surface, pond);
+        using (var bank = new Pen(iceEdge, 5 * scale) { LineJoin = LineJoin.Round })
+            g.DrawPath(bank, pond);
+
+        var clip = g.Save();
+        g.SetClip(pond);
+        using (var glint = new Pen(Color.FromArgb(113, iceEdge), 1.5f * scale))
+        {
+            g.DrawBezier(glint, center.X - halfWidth * .66f, center.Y + 10 * scale,
+                center.X - halfWidth * .35f, center.Y + 19 * scale, center.X + halfWidth * .26f,
+                center.Y - 9 * scale, center.X + halfWidth * .66f, center.Y - 8 * scale);
+            g.DrawBezier(glint, center.X - halfWidth * .53f, center.Y + 28 * scale,
+                center.X - halfWidth * .26f, center.Y + 22 * scale, center.X + halfWidth * .49f,
+                center.Y + 27 * scale, center.X + halfWidth * .72f, center.Y + 10 * scale);
+        }
+        g.Restore(clip);
+
+        // A few landmarks carry the winter scene across the monitor.
+        DrawMeadowSpruce(g, w * .048f, h * .849f, 155 * scale, 48 * scale, dark);
+        DrawMeadowSpruce(g, w * .093f, h * .809f, 107 * scale, 33 * scale, dark);
+        DrawMeadowSpruce(g, w * .43f, h * .746f, 96 * scale, 31 * scale, dark);
+        DrawMeadowSpruce(g, w * .46f, h * .773f, 130 * scale, 40 * scale, dark);
+        DrawBench(g, new(center.X + halfWidth * .75f, pathY - 16 * scale), scale, iceEdge, dark);
+    }
+
+    private static void DrawMeadowSpruce(Graphics g, float x, float y, float height, float half, float dark)
+    {
+        var needles = Mix(C("#547c7e"), C("#304b60"), dark);
+        var powder = Mix(C("#eaf3f0"), C("#94acc2"), dark);
+        Ellipse(g, Color.FromArgb(62, C("#38566d")), x - half * 1.11f, y - height * .045f,
+            half * 2.22f, height * .11f);
+        using (var fill = new SolidBrush(needles))
+            Fir(g, fill, x, y, height, half);
+        for (var i = 0; i < 3; i++)
+        {
+            var level = y - height * (1 - i * .22f);
+            var edge = half * (.44f + i * .17f);
+            Poly(g, powder, new(x, level), new(x - edge, level + height * .36f),
+                new(x - edge * .22f, level + height * .27f),
+                new(x + edge * .42f, level + height * .30f),
+                new(x + edge * .84f, level + height * .32f));
+        }
+    }
+
+    private static void DrawBench(Graphics g, PointF position, float scale, Color snow, float dark)
+    {
+        var state = g.Save();
+        g.TranslateTransform(position.X, position.Y);
+        g.ScaleTransform(scale, scale);
+        var wood = Mix(C("#936964"), C("#655162"), dark);
+        var frame = Mix(C("#566778"), C("#3a4e65"), dark);
+        Ellipse(g, Color.FromArgb(61, C("#37536e")), -49, -3, 98, 13);
+        Line(g, frame, 3.6f, -32, -29, -32, 2);
+        Line(g, frame, 3.6f, 32, -29, 32, 2);
+        Rect(g, wood, -39, -29, 78, 8);
+        Rect(g, wood, -42, -13, 84, 7);
+        Rect(g, snow, -41, -15, 82, 3);
+        g.Restore(state);
+    }
+
     private static void DrawYard(Graphics g, Daylight light, int ornaments, int snow, float dark, int missing)
     {
         var snowColor = Mix(C("#f7fcf8"), C("#bdd3e2"), dark);
@@ -158,7 +284,8 @@ internal static class YardArt
         var darkWood = C("#443445");
         Rect(g, C("#6e4b53"), -89, -195, 24, 55);
         Rect(g, snow, -93, -198, 31, 7);
-        Poly(g, siding, new(-233, -105), new(-134, -179), new(-34, -105), new(-34, -9), new(-233, -9));
+        // Extend the gable behind the fascia so neither slope exposes the sky at its seam.
+        Poly(g, siding, new(-233, -105), new(-134, -195), new(-34, -105), new(-34, -9), new(-233, -9));
         using (var board = new Pen(Color.FromArgb(72, darkWood), 2))
         {
             for (var y = -100; y < -10; y += 11)
