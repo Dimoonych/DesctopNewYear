@@ -18,7 +18,9 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private int snowFrame = -1;
     private bool weatherEnabled;
     private PrankFrame prank;
-    private (Daylight Light, int Ornaments, int Snow, int Missing, Miniature[] Miniatures)? painted;
+    private SnowCover groundSnow;
+    private Miniature[] miniatures = [];
+    private (Daylight Light, int Ornaments, int Missing)? painted;
 
     public bool Available => Handle != 0 && Native.IsWindow(Handle) && host.Available;
     public nint IconHost => host.IconHost;
@@ -72,12 +74,11 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     public void Draw(Daylight daylight, YardSettings settings, ActorFrame? backSnowman, ActorFrame? backOwl,
         bool showWeather)
     {
-        var key = (daylight, settings.Ornaments, settings.Snow, scene.StolenOrnament, settings.Miniatures);
+        var key = (daylight, settings.Ornaments, scene.StolenOrnament);
         var dirty = Rectangle.Empty;
         if (painted != key)
         {
-            var next = YardArt.Landscape(layout, daylight, settings.Ornaments, settings.Snow, scene.StolenOrnament,
-                settings.Miniatures);
+            var next = YardArt.Landscape(layout, daylight, settings.Ornaments, scene.StolenOrnament);
             landscape?.Dispose();
             landscape = next;
             painted = key;
@@ -97,6 +98,19 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         }
         snowman = backSnowman;
         owl = backOwl;
+
+        var nextGround = scene.GroundSnow;
+        if (groundSnow.Depth != nextGround.Depth || groundSnow.Fresh != nextGround.Fresh ||
+            miniatures != settings.Miniatures)
+            Invalidate(layout.DriftArea);
+        else if (groundSnow.RightEdge != nextGround.RightEdge)
+        {
+            var band = layout.DriftArea;
+            Invalidate(Rectangle.FromLTRB(Math.Min(groundSnow.RightEdge, nextGround.RightEdge), band.Top,
+                Math.Max(groundSnow.RightEdge, nextGround.RightEdge), band.Bottom));
+        }
+        groundSnow = nextGround;
+        miniatures = settings.Miniatures;
 
         var nextWeather = showWeather ? scene.AmbientFootprint() : Rectangle.Empty;
         dirty = Union(Union(dirty, weather), nextWeather);
@@ -198,6 +212,8 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
             return;
         graphics.DrawImage(landscape, region, region, GraphicsUnit.Pixel);
         YardArt.Prepare(graphics);
+        if (painted is { } key && region.IntersectsWith(layout.DriftArea))
+            YardArt.DrawGroundSnow(graphics, layout, key.Light, groundSnow, miniatures);
         if (weatherEnabled)
             scene.DrawWeather(graphics, flakes);
         DrawPrank(graphics);

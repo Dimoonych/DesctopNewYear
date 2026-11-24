@@ -47,7 +47,7 @@ internal sealed class YardSettings
         settings.Snow = Math.Clamp(settings.Snow, 0, 3);
         settings.Miniatures = (settings.Miniatures ?? [])
             .Where(figure => figure is { Slot: >= 0 and < YardLayout.MiniatureSlots, Size: >= 22 and <= 30,
-                Snowfalls: >= 0 and < Miniature.BurialLimit })
+                Snowfalls: >= 0 and <= Miniature.BurialLimit })
             .DistinctBy(figure => figure.Slot)
             .ToArray();
         if (settings.Miniatures.Length == 0 && settings.MiniSnowmanSize is >= 22 and <= 30)
