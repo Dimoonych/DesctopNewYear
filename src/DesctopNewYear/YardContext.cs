@@ -18,7 +18,8 @@ internal sealed class YardContext : ApplicationContext
     private readonly ExitShortcut exitShortcut;
     private readonly YardScene scene;
     private WallpaperWindow? wallpaper;
-    private SpriteWindow? snowman, owl;
+    private SpriteWindow? snowman, owl, visitingOwl;
+    private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
     private (int Ornaments, int Snow) saved;
@@ -55,6 +56,7 @@ internal sealed class YardContext : ApplicationContext
             Item("Позвать снеговика на прогулку", () => Run(scene.StartWalk)),
             Item("Сходить за игрушкой", () => Run(scene.StartToy)),
             Item("Позвать сову", () => Run(scene.CallOwl)),
+            Item("Сова, на окно", () => Run(scene.AskForPerch)),
             Item("Сова, верни шляпу!", () => Run(scene.CallHatPrank)),
             Item("Включить снегопад", () => Run(scene.StartSnow)),
             Item("Позвать снеговика с лопатой", () => Run(scene.CallCleaner)),
@@ -69,6 +71,8 @@ internal sealed class YardContext : ApplicationContext
         wallpaperOnly.Click += (_, _) =>
         {
             settings.WallpaperOnly = !settings.WallpaperOnly;
+            if (settings.WallpaperOnly)
+                scene.DismissWindowPerch(showDeparture: false);
             Save();
             Render(DateTime.Now);
         };
@@ -128,6 +132,8 @@ internal sealed class YardContext : ApplicationContext
     private void TogglePause()
     {
         paused = !paused;
+        if (paused)
+            scene.DismissWindowPerch(showDeparture: false);
         lastFrame = clock.Elapsed.TotalSeconds;
         Tick();
     }
@@ -156,11 +162,17 @@ internal sealed class YardContext : ApplicationContext
                 ReleaseDesktop();
                 nextAttach = 0;
             }
-            fullscreen = Native.IsFullscreen(Native.ForegroundBounds(), layout.View);
+            var foreground = Native.ForegroundApp();
+            var bounds = Native.FrameBounds(foreground);
+            fullscreen = Native.IsFullscreen(bounds, layout.View);
+            perchCandidate = Native.FindPerch(foreground, bounds, layout);
+            if (fullscreen)
+                scene.DismissWindowPerch(showDeparture: false);
         }
 
         if (elapsed >= nextAttach &&
-            (wallpaper is not { Available: true } || snowman is not { Available: true } || owl is not { Available: true }))
+            (wallpaper is not { Available: true } || snowman is not { Available: true } ||
+             owl is not { Available: true } || visitingOwl is not { Available: true }))
         {
             nextAttach = elapsed + 12;
             AttachDesktop();
@@ -169,7 +181,7 @@ internal sealed class YardContext : ApplicationContext
         var now = DateTime.Now;
         owl?.UpdateDrag();
         if (!paused && !fullscreen)
-            scene.Advance(seconds, Daylight.At(now, settings), now);
+            scene.Advance(seconds, Daylight.At(now, settings), now, PickPerch());
         Render(now);
         if (saved != (settings.Ornaments, settings.Snow))
             Save();
@@ -177,6 +189,21 @@ internal sealed class YardContext : ApplicationContext
         var interval = scene.InMotion && !paused && !fullscreen ? 40 : 650;
         if (interval != timer.Interval)
             timer.Interval = interval;
+    }
+
+    private WindowPerch? PickPerch()
+    {
+        if (settings.WallpaperOnly || visitingOwl is not { Available: true })
+            return null;
+
+        if (scene.CurrentPerch is not { } current)
+            return perchCandidate;
+
+        // During a visit, look at the exact target every animation tick so even small moves scare her off.
+        if (Native.GetForegroundWindow() != current.Window)
+            return null;
+
+        return Native.FindPerch(current.Window, Native.FrameBounds(current.Window), scene.Layout);
     }
 
     private void AttachDesktop()
@@ -195,6 +222,7 @@ internal sealed class YardContext : ApplicationContext
 
             snowman = new SpriteWindow(owl: false, wallpaper.IconHost);
             owl = new SpriteWindow(owl: true, wallpaper.IconHost);
+            visitingOwl = new SpriteWindow(owl: true, desktop: 0);
             snowman.Clicked += _ => Run(scene.GreetSnowman);
             owl.Clicked += cursor => Run(() => scene.TouchOwl(cursor));
             owl.Dragged += scene.DragOwl;
@@ -216,27 +244,31 @@ internal sealed class YardContext : ApplicationContext
         var layout = scene.Layout;
         var snowmanFrame = scene.Snowman;
         var owlFrame = scene.Owl;
+        var isVisiting = !settings.WallpaperOnly && !fullscreen && !paused &&
+            visitingOwl is { Available: true } && scene.OwlOverWindows;
         var interactive = !settings.WallpaperOnly && snowman is { Available: true } && owl is { Available: true };
 
         try
         {
             snowman?.Draw(interactive && !fullscreen ? snowmanFrame : null, layout.Scale, layout.View);
-            owl?.Draw(interactive && !fullscreen ? owlFrame : null, layout.Scale, layout.View);
+            owl?.Draw(interactive && !fullscreen && !isVisiting ? owlFrame : null, layout.Scale, layout.View);
+            visitingOwl?.Draw(isVisiting ? owlFrame : null, layout.Scale, layout.View);
         }
         catch (Win32Exception)
         {
             ReleaseSprites();
-            interactive = false;
+            isVisiting = false;
         }
-        wallpaper.Draw(Daylight.At(now, settings), settings, interactive ? null : snowmanFrame,
-            interactive ? null : owlFrame, !fullscreen && !paused);
+        wallpaper.Draw(Daylight.At(now, settings), settings, snowmanFrame,
+            isVisiting ? null : owlFrame, !fullscreen && !paused);
     }
 
     private void ReleaseSprites()
     {
         owl?.Dispose();
         snowman?.Dispose();
-        owl = snowman = null;
+        visitingOwl?.Dispose();
+        owl = snowman = visitingOwl = null;
     }
 
     private void ReleaseDesktop()

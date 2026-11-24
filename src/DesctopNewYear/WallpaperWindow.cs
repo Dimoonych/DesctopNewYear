@@ -73,8 +73,8 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
             dirty = new Rectangle(Point.Empty, layout.View.Size);
         }
 
-        MarkActor(ref dirty, snowman, backSnowman);
-        MarkActor(ref dirty, owl, backOwl);
+        MarkActor(snowman, backSnowman);
+        MarkActor(owl, backOwl);
         snowman = backSnowman;
         owl = backOwl;
 
@@ -112,14 +112,16 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         Native.InvalidateRect(Handle, ref rectangle, false);
     }
 
-    private void MarkActor(ref Rectangle dirty, ActorFrame? previous, ActorFrame? next)
+    private void MarkActor(ActorFrame? previous, ActorFrame? next)
     {
         if (previous == next)
             return;
+        var dirty = Rectangle.Empty;
         if (previous is { } old)
             dirty = Union(dirty, old.Footprint(layout.Scale, layout.View.Location));
         if (next is { } active)
             dirty = Union(dirty, active.Footprint(layout.Scale, layout.View.Location));
+        Invalidate(dirty);
     }
 
     private static Rectangle Union(Rectangle a, Rectangle b) => a.IsEmpty ? b :
@@ -147,18 +149,25 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
             var region = paint.Region.Rectangle;
             if (region.Width <= 0 || region.Height <= 0)
                 return;
-            graphics.DrawImage(landscape, region, region, GraphicsUnit.Pixel);
-            YardArt.Prepare(graphics);
-            if (weatherEnabled)
-                scene.DrawWeather(graphics, flakes);
-            DrawPrank(graphics);
-            DrawActor(graphics, snowman, region);
-            DrawActor(graphics, owl, region);
+            PaintFrame(graphics, region);
         }
         finally
         {
             Native.EndPaint(message.HWnd, ref paint);
         }
+    }
+
+    internal void PaintFrame(Graphics graphics, Rectangle region)
+    {
+        if (landscape is null)
+            return;
+        graphics.DrawImage(landscape, region, region, GraphicsUnit.Pixel);
+        YardArt.Prepare(graphics);
+        if (weatherEnabled)
+            scene.DrawWeather(graphics, flakes);
+        DrawPrank(graphics);
+        DrawActor(graphics, snowman, region);
+        DrawActor(graphics, owl, region);
     }
 
     private void DrawPrank(Graphics graphics)

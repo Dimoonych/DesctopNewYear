@@ -29,13 +29,16 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
         this.desktop = desktop;
         CreateHandle(new CreateParams
         {
-            Caption = owl ? "DesctopNewYear — сова" : "DesctopNewYear — снеговик",
+            Caption = desktop == 0 ? "DesctopNewYear — сова на окне" :
+                owl ? "DesctopNewYear — сова" : "DesctopNewYear — снеговик",
             Style = Native.Popup,
-            ExStyle = Native.Layered | Native.NoActivate | Native.ToolWindow
+            ExStyle = Native.Layered | Native.NoActivate | Native.ToolWindow |
+                (desktop == 0 ? Native.Transparent : 0)
         });
         try
         {
-            Native.AttachChild(Handle, desktop);
+            if (desktop != 0)
+                Native.AttachChild(Handle, desktop);
         }
         catch
         {
@@ -83,15 +86,16 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
         }
 
         var destination = new Native.NativePoint(left, top);
-        if (!Native.ScreenToClient(desktop, ref destination))
+        if (desktop != 0 && !Native.ScreenToClient(desktop, ref destination))
             throw new Win32Exception("Не удалось определить положение персонажа на рабочем столе.");
         var size = new Native.NativeSize(width, height);
         var source = new Native.NativePoint();
-        var blend = new Native.Blend { Alpha = 255, Format = 1 };
+        // The wallpaper paints desktop actors. These children only provide silhouette-shaped input.
+        var blend = new Native.Blend { Alpha = desktop == 0 ? (byte)255 : (byte)1, Format = 1 };
         if (!Native.UpdateLayeredWindow(Handle, 0, ref destination, ref size, dc, ref source, 0, ref blend, 2))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось обновить окно персонажа.");
 
-        if (!visible && !Native.SetWindowPos(Handle, 0, 0, 0, 0, 0,
+        if (!visible && !Native.SetWindowPos(Handle, desktop == 0 ? Native.Topmost : 0, 0, 0, 0, 0,
                 Native.NoMove | Native.NoSize | Native.Inactive | Native.Show))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось показать персонажа на рабочем столе.");
 

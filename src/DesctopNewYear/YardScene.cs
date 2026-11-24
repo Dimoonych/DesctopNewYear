@@ -41,7 +41,7 @@ internal sealed class YardScene
         Rest, WalkAround, Inspect, Leave, Away, Carry, Hang, Return, ToPath, Clean,
         FetchTractor, TractorAway, Plow, DriveOut, FindHat
     }
-    private enum OwlAction { Roam, Steal, ReturnToy, ShakeBranch, Leave, TakeHat, DropHat }
+    private enum OwlAction { Roam, Steal, ReturnToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow }
     private enum Chore { Walk, Tree, Lantern }
 
     private readonly YardSettings settings;
@@ -55,6 +55,8 @@ internal sealed class YardScene
     private double nextToy = 5, nextWalk = 3, nextOwl = 8, nextSnow = 16, nextSmoke = 8, nextHatTheft = 55;
     private double nextShot;
     private bool askedForToy, askedForWalk, askedForTractor, askedForHat, owlAway;
+    private bool askedForPerch, visibleDeparture;
+    private double nextWindowVisit;
     private bool hatMissing, owlHasHat;
     private int plowed, snowballsLeft;
     private float hatFall, shotAge, throwPose;
@@ -70,8 +72,12 @@ internal sealed class YardScene
     public bool Smoking => smoke > 0;
     public bool PowderFalling => powder > 0;
     public int StolenOrnament => stolen;
+    public WindowPerch? CurrentPerch { get; private set; }
+    public bool OwlOverWindows => !owlAway &&
+        (CurrentPerch is { } perch && Distance(owl, perch.Feet) < 153 * Layout.Scale ||
+         owlAction == OwlAction.LeaveWindow && visibleDeparture && owlFlight > 0 && owlTime < .65f);
     public bool InMotion => snowmanAction is not (SnowmanAction.Rest or SnowmanAction.Away) ||
-        snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown ||
+        snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown || CurrentPerch.HasValue ||
         Snowing || Smoking || PowderFalling;
 
     public YardScene(YardSettings settings, YardLayout layout, Random? random = null)
@@ -97,6 +103,7 @@ internal sealed class YardScene
         owlFlight = 0;
         owlAction = OwlAction.Roam;
         owlAway = false;
+        CurrentPerch = null;
         stolen = -1;
         mouseDown = owlDragged = false;
         hatMissing = owlHasHat = false;
@@ -145,6 +152,23 @@ internal sealed class YardScene
     public void StartWalk() => askedForWalk = true;
 
     public void CallOwl() => nextOwl = time;
+
+    public void AskForPerch()
+    {
+        askedForPerch = true;
+        nextOwl = time;
+    }
+
+    public void DismissWindowPerch(bool showDeparture)
+    {
+        if (!CurrentPerch.HasValue)
+            return;
+
+        visibleDeparture = showDeparture && OwlOverWindows;
+        CurrentPerch = null;
+        nextWindowVisit = time + 20;
+        FlyTo(Layout.Roof, OwlAction.LeaveWindow);
+    }
 
     public void CallHatPrank()
     {
@@ -206,6 +230,7 @@ internal sealed class YardScene
 
         owlDragged = true;
         owlFlight = 0;
+        CurrentPerch = null;
         owlAction = OwlAction.Roam;
         var area = Layout.Work;
         owl = new(Math.Clamp(cursor.X + dragOffset.X, area.Left + 30, area.Right - 30),
@@ -237,7 +262,7 @@ internal sealed class YardScene
         FlyTo(Layout.Roof, OwlAction.Roam);
     }
 
-    public void Advance(float seconds, Daylight daylight, DateTime localTime)
+    public void Advance(float seconds, Daylight daylight, DateTime localTime, WindowPerch? window = null)
     {
         time += seconds;
         snowmanTime += seconds;
@@ -250,7 +275,7 @@ internal sealed class YardScene
         AdvanceWeather(seconds, daylight);
         AdvanceSnowman(seconds, localTime.Hour >= 23 || localTime.Hour < 7);
         if (!mouseDown)
-            AdvanceOwl(seconds);
+            AdvanceOwl(seconds, window);
     }
 
     private void AdvanceWeather(float seconds, Daylight daylight)
@@ -455,7 +480,7 @@ internal sealed class YardScene
             Layout.View.Top + Layout.View.Height * .54f);
     }
 
-    private void AdvanceOwl(float seconds)
+    private void AdvanceOwl(float seconds, WindowPerch? window)
     {
         if (owlAway)
         {
@@ -467,6 +492,9 @@ internal sealed class YardScene
             }
             return;
         }
+
+        if (CurrentPerch.HasValue && CurrentPerch != window)
+            DismissWindowPerch(showDeparture: true);
 
         if (owlFlight > 0)
         {
@@ -480,6 +508,13 @@ internal sealed class YardScene
             owl = owlTarget;
             owlFlight = 0;
             FinishFlight();
+            return;
+        }
+
+        if (CurrentPerch.HasValue)
+        {
+            if (time >= nextOwl)
+                DismissWindowPerch(showDeparture: true);
             return;
         }
 
@@ -503,11 +538,19 @@ internal sealed class YardScene
             FlyTo(new(snowman.X, snowman.Y - 106 * Layout.Scale), OwlAction.TakeHat);
             return;
         }
-        if (time < nextOwl)
+        var canVisit = !hatMissing && stolen < 0 && window.HasValue;
+        if (time < nextOwl && !(askedForPerch && canVisit))
             return;
 
         if (stolen >= 0)
             FlyTo(Layout.Branch, OwlAction.ReturnToy);
+        else if (!hatMissing && window is { } perch && (askedForPerch ||
+            time >= nextWindowVisit && random.Next(4) == 0))
+        {
+            askedForPerch = false;
+            CurrentPerch = perch;
+            FlyTo(perch.Feet, OwlAction.AtWindow);
+        }
         else if (snowmanAction is SnowmanAction.Leave or SnowmanAction.Away && settings.Ornaments is > 0 and < 7)
             FlyTo(Layout.Branch, OwlAction.Steal);
         else if (random.Next(3) == 0)
@@ -550,6 +593,9 @@ internal sealed class YardScene
             case OwlAction.DropHat:
                 ReleaseHat();
                 FlyTo(Layout.Roof, OwlAction.Roam);
+                break;
+            case OwlAction.AtWindow:
+                nextOwl = time + random.Next(4, 8);
                 break;
             case OwlAction.ShakeBranch when snowmanAction == SnowmanAction.Clean:
                 settings.Snow = Math.Min(3, settings.Snow + 1);
@@ -691,3 +737,4 @@ internal sealed class YardScene
 
 internal readonly record struct Snowflake(float X, float Y, float Speed, float Size, float Intensity);
 internal readonly record struct PrankFrame(PointF? Hat, float Angle, PointF? Snowball);
+internal readonly record struct WindowPerch(nint Window, Rectangle Frame, PointF Feet);
