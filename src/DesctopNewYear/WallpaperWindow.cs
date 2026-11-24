@@ -10,6 +10,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     private readonly YardLayout layout;
     private readonly YardScene scene;
     private readonly Snowflake[] flakes;
+    private readonly BufferedGraphicsContext frameBuffer;
     private Bitmap? landscape;
     private ActorFrame? snowman, owl;
     private Rectangle weather;
@@ -34,6 +35,10 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         if (!Native.ScreenToClient(host.Parent, ref position))
             throw new Win32Exception("Не удалось определить положение рабочего стола.");
 
+        frameBuffer = new BufferedGraphicsContext
+        {
+            MaximumBuffer = new Size(layout.View.Width, layout.View.Height)
+        };
         try
         {
             CreateHandle(new CreateParams
@@ -55,6 +60,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         catch
         {
             DestroyHandle();
+            frameBuffer.Dispose();
             throw;
         }
     }
@@ -143,18 +149,25 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
         var dc = Native.BeginPaint(message.HWnd, out var paint);
         try
         {
-            if (dc == 0 || landscape is null || paint.Region.Rectangle.IsEmpty)
+            if (dc == 0 || landscape is null)
                 return;
-            using var graphics = Graphics.FromHdc(dc);
             var region = paint.Region.Rectangle;
             if (region.Width <= 0 || region.Height <= 0)
                 return;
-            PaintFrame(graphics, region);
+            PresentFrame(dc, region);
         }
         finally
         {
             Native.EndPaint(message.HWnd, ref paint);
         }
+    }
+
+    internal void PresentFrame(nint destination, Rectangle region)
+    {
+        // Present the finished scene in one copy so the desktop never shows the erased actors.
+        using var frame = frameBuffer.Allocate(destination, region);
+        PaintFrame(frame.Graphics, region);
+        frame.Render(destination);
     }
 
     internal void PaintFrame(Graphics graphics, Rectangle region)
@@ -197,6 +210,7 @@ internal sealed class WallpaperWindow : NativeWindow, IDisposable
     public void Dispose()
     {
         DestroyHandle();
+        frameBuffer.Dispose();
         landscape?.Dispose();
         landscape = null;
     }
