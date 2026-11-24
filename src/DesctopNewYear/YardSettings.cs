@@ -13,6 +13,7 @@ internal sealed class YardSettings
     public string? Monitor { get; set; }
     public bool WallpaperOnly { get; set; }
     public int Ornaments { get; set; }
+    public int MissingOrnament { get; set; } = -1;
     public int Snow { get; set; }
 
     public static YardSettings Load()
@@ -24,6 +25,8 @@ internal sealed class YardSettings
             settings.Dusk = Math.Clamp(settings.Dusk, 10 * 60, 22 * 60);
             settings.LightsOff = Math.Clamp(settings.LightsOff, settings.Dusk + 60, 1439);
             settings.Ornaments = Math.Clamp(settings.Ornaments, 0, 7);
+            if (settings.MissingOrnament < 0 || settings.MissingOrnament >= Math.Min(settings.Ornaments, 6))
+                settings.MissingOrnament = -1;
             settings.Snow = Math.Clamp(settings.Snow, 0, 3);
             return settings;
         }

@@ -45,7 +45,7 @@ internal sealed class YardScene
         Rest, WalkAround, Inspect, Leave, Away, Carry, Hang, Return, ToPath, Clean,
         FetchTractor, TractorAway, Plow, DriveOut, FindHat, PickHat, FindToy, PickToy
     }
-    private enum OwlAction { Roam, Steal, DropToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow }
+    private enum OwlAction { Roam, Steal, DiscardToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow }
     private enum Chore { Walk, Tree, Lantern }
 
     private readonly YardSettings settings;
@@ -56,9 +56,9 @@ internal sealed class YardScene
     private int direction = -1, owlLook, held = -1, stolen = -1;
     private double time;
     private float snowmanTime, owlTime, owlFlight, snowmanReaction, owlReaction;
-    private double nextToy = 5, nextWalk = 3, nextOwl = 8, nextSnow = 16, nextSmoke = 8, nextHatTheft = 55;
+    private double nextToy = 8, nextWalk = 5, nextOwl = 12, nextSnow = 16, nextSmoke = 8, nextHatTheft = 55;
     private double nextShot;
-    private double nextToyTheft = 8;
+    private double nextToyTheft = 14;
     private bool askedForToy, askedForWalk, askedForTractor, askedForHat, owlAway;
     private bool askedForToyTheft, owlHasToy, returningToy, threwAtToy;
     private int plannedToy;
@@ -85,7 +85,7 @@ internal sealed class YardScene
     public int SnowFrame => Snowing ? (int)((SnowDuration - snowfall) * SnowUpdatesPerSecond) : -1;
     public bool Smoking => smoke > 0;
     public bool PowderFalling => powder > 0;
-    public int StolenOrnament => stolen;
+    public int StolenOrnament => stolen >= 0 ? stolen : settings.MissingOrnament;
     public WindowPerch? CurrentPerch { get; private set; }
     public bool OwlOverWindows => !owlAway &&
         (CurrentPerch is { } perch && Distance(owl, perch.Feet) < 153 * Layout.Scale ||
@@ -101,6 +101,8 @@ internal sealed class YardScene
         Layout = layout;
         snowman = layout.Home;
         owl = layout.Roof;
+        if (settings.MissingOrnament >= 0)
+            nextToy = 18;
     }
 
     public void SetLayout(YardLayout layout)
@@ -147,7 +149,9 @@ internal sealed class YardScene
             {
                 SnowmanAction.Plow or SnowmanAction.DriveOut => Pose.Tractor,
                 SnowmanAction.FindHat or SnowmanAction.FindToy when throwPose > 0 => Pose.Throw,
+                SnowmanAction.FindToy when owlHasToy => Pose.Rest,
                 SnowmanAction.PickHat or SnowmanAction.PickToy => Pose.PickUp,
+                _ when owlAction == OwlAction.Steal && owlFlight > 0 => Pose.Rest,
                 _ when snowmanReaction > 0 => Pose.React,
                 SnowmanAction.Clean => powder > .5f ? Pose.Rest : Pose.Shovel,
                 SnowmanAction.Hang => Pose.Hang,
@@ -228,7 +232,7 @@ internal sealed class YardScene
     }
 
     public void StartToy() => askedForToy = true;
-    public void AskForToyTheft() => askedForToyTheft = stolen < 0 && owlAction != OwlAction.Steal;
+    public void AskForToyTheft() => askedForToyTheft = StolenOrnament < 0 && owlAction != OwlAction.Steal;
 
     public void GreetSnowman()
     {
@@ -384,13 +388,6 @@ internal sealed class YardScene
         AdvanceSnowman(seconds, localTime.Hour >= 23 || localTime.Hour < 7);
         if (!mouseDown)
             AdvanceOwl(seconds, window);
-        if (owlHasToy && !mouseDown && shotAge > 0 &&
-            Distance(SnowballPosition, new PointF(owl.X, owl.Y - 36 * Layout.Scale)) < 28 * Layout.Scale)
-        {
-            ReleaseOrnament();
-            shotAge = 0;
-            FlyTo(Layout.Roof, OwlAction.Roam);
-        }
     }
 
     private void AdvanceWeather(float seconds, Daylight daylight)
@@ -460,30 +457,33 @@ internal sealed class YardScene
             case SnowmanAction.Leave when WalkTo(Offscreen, seconds):
                 SetSnowman(SnowmanAction.Away);
                 break;
-            case SnowmanAction.Away when snowmanTime >= 3.2f:
-                held = settings.Ornaments < 7 ? settings.Ornaments : random.Next(0, 6);
+            case SnowmanAction.Away when snowmanTime >= 4.6f:
+                returningToy = settings.MissingOrnament >= 0;
+                held = returningToy ? settings.MissingOrnament :
+                    settings.Ornaments < 7 ? settings.Ornaments : random.Next(0, 6);
                 SetSnowman(SnowmanAction.Carry);
                 break;
-            case SnowmanAction.Carry when WalkTo(Layout.Tree, seconds):
+            case SnowmanAction.Carry when WalkTo(Layout.Tree, seconds, 132):
                 direction = -1;
                 SetSnowman(SnowmanAction.Hang);
                 break;
-            case SnowmanAction.Hang when snowmanTime >= 1.3f:
+            case SnowmanAction.Hang when snowmanTime >= 1.9f:
                 if (returningToy)
                 {
                     stolen = -1;
+                    settings.MissingOrnament = -1;
                     returningToy = false;
-                    nextToyTheft = time + random.Next(9, 18);
+                    nextToyTheft = time + random.Next(24, 39);
                 }
                 else
                     settings.Ornaments = Math.Min(7, settings.Ornaments + 1);
                 held = -1;
-                nextToy = time + (late ? random.Next(40, 66) : random.Next(22, 41));
-                nextWalk = Math.Max(nextWalk, time + 4);
+                nextToy = time + (late ? random.Next(48, 75) : random.Next(30, 50));
+                nextWalk = Math.Max(nextWalk, time + 8);
                 SetSnowman(SnowmanAction.Return);
                 break;
             case SnowmanAction.Return when WalkTo(Layout.Home, seconds):
-                nextWalk = Math.Max(nextWalk, time + (late ? 5 : 2.5));
+                nextWalk = Math.Max(nextWalk, time + (late ? 12 : 7));
                 SetSnowman(SnowmanAction.Rest);
                 break;
             case SnowmanAction.ToPath when WalkTo(Layout.Path, seconds):
@@ -532,7 +532,7 @@ internal sealed class YardScene
     private void BeginWalk(bool late)
     {
         askedForWalk = false;
-        nextWalk = time + (late ? random.Next(15, 25) : random.Next(7, 13));
+        nextWalk = time + (late ? random.Next(24, 36) : random.Next(14, 24));
         chore = (Chore)(((int)chore + 1) % 3);
         strollStop = chore switch
         {
@@ -580,15 +580,20 @@ internal sealed class YardScene
 
     private void AdvanceToyChase(float seconds)
     {
-        if (owlHasToy && !threwAtToy && snowmanTime >= .22f)
+        if (owlHasToy)
         {
-            ThrowSnowball(owlFlight > 0 ? FlightPoint(owlTime + .60f) : owl);
-            threwAtToy = true;
+            direction = owl.X < snowman.X ? -1 : 1;
+            if (!threwAtToy && snowmanTime >= 1.25f)
+            {
+                var aim = owlFlight > 0 ? FlightPoint(owlTime + .52f) : owl;
+                aim.Y += 35 * Layout.Scale;
+                ThrowSnowball(aim);
+                threwAtToy = true;
+            }
+            return;
         }
 
-        var target = owlHasToy ? new PointF(Math.Clamp(owl.X,
-            Layout.Work.Left + 35 * Layout.Scale, Layout.Work.Right - 35 * Layout.Scale), Layout.Home.Y) : toyLanding;
-        if (throwPose <= 0 && WalkTo(target, seconds, 215) && !owlHasToy && toyFall <= 0)
+        if (throwPose <= 0 && WalkTo(toyLanding, seconds, 155) && toyFall <= 0)
             SetSnowman(SnowmanAction.PickToy);
     }
 
@@ -702,14 +707,14 @@ internal sealed class YardScene
             return;
         }
         var canStealHat = !hatMissing && !hatGrabbed && stolen < 0 && settings.Snow < 3 && SnowmanFree;
-        if (canStealHat && (askedForHat || time >= nextHatTheft))
+        if (canStealHat && (askedForHat || settings.MissingOrnament < 0 && time >= nextHatTheft))
         {
             askedForHat = false;
             FlyTo(new(snowman.X, snowman.Y - 106 * Layout.Scale), OwlAction.TakeHat);
             return;
         }
         var canVisit = !hatMissing && stolen < 0 && window.HasValue;
-        var canStealToy = canStealHat && settings.Ornaments > 0;
+        var canStealToy = canStealHat && settings.Ornaments > 0 && settings.MissingOrnament < 0;
         if (canStealToy && (askedForToyTheft || time >= nextToyTheft))
         {
             askedForToyTheft = false;
@@ -745,26 +750,25 @@ internal sealed class YardScene
         return point;
     }
 
-    private void FlyTo(PointF target, OwlAction action)
+    private void FlyTo(PointF target, OwlAction action, int speed = 355, float maxDuration = 2.7f)
     {
         owlStart = owl;
         owlTarget = target;
         owlTime = 0;
-        owlFlight = Math.Clamp(Distance(owl, target) / (355 * Layout.Scale), .45f, 2.7f);
+        owlFlight = Math.Clamp(Distance(owl, target) / (speed * Layout.Scale), .45f, maxDuration);
         owlAction = action;
     }
 
     private void FinishFlight()
     {
-        nextOwl = time + random.Next(6, 15);
+        nextOwl = time + random.Next(12, 23);
         switch (owlAction)
         {
             case OwlAction.Steal:
                 BeginToyChase();
                 break;
-            case OwlAction.DropToy:
-                ReleaseOrnament();
-                FlyTo(Layout.Roof, OwlAction.Roam);
+            case OwlAction.DiscardToy:
+                DiscardOrnament();
                 break;
             case OwlAction.Leave:
                 owlAway = true;
@@ -795,9 +799,20 @@ internal sealed class YardScene
         threwAtToy = false;
         snowmanReaction = 0;
         SetSnowman(SnowmanAction.FindToy);
-        var work = Layout.Work;
-        FlyTo(new(work.Left + work.Width * (.27f + random.NextSingle() * .27f),
-            Layout.Home.Y - 174 * Layout.Scale), OwlAction.DropToy);
+        var edge = LeftEdge with { Y = Layout.View.Top + Layout.View.Height * (.34f + random.NextSingle() * .12f) };
+        FlyTo(edge, OwlAction.DiscardToy, speed: 224, maxDuration: 7.5f);
+    }
+
+    private void DiscardOrnament()
+    {
+        settings.MissingOrnament = stolen;
+        stolen = -1;
+        owlHasToy = false;
+        owlAway = true;
+        nextOwl = time + random.Next(5, 10);
+        nextToy = time + random.Next(18, 30);
+        snowmanReaction = 1.1f;
+        SetSnowman(SnowmanAction.Return);
     }
 
     private void ReleaseOrnament()

@@ -22,12 +22,14 @@ internal sealed class YardContext : ApplicationContext
     private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
-    private (int Ornaments, int Snow) saved;
+    private (int Ornaments, int Snow, int MissingOrnament) saved;
+    private (int Ornaments, int Snow, int MissingOrnament) Progress =>
+        (settings.Ornaments, settings.Snow, settings.MissingOrnament);
 
     public YardContext()
     {
         scene = new(settings, PickLayout());
-        saved = (settings.Ornaments, settings.Snow);
+        saved = Progress;
         icon = DrawIcon();
         tray = new NotifyIcon
         {
@@ -185,7 +187,7 @@ internal sealed class YardContext : ApplicationContext
         if (!paused && !fullscreen)
             scene.Advance(seconds, Daylight.At(now, settings), now, PickPerch());
         Render(now);
-        if (saved != (settings.Ornaments, settings.Snow))
+        if (saved != Progress)
             Save();
 
         var interval = scene.InMotion && !paused && !fullscreen ? 40 : 650;
@@ -303,7 +305,7 @@ internal sealed class YardContext : ApplicationContext
 
     private void Save()
     {
-        saved = (settings.Ornaments, settings.Snow);
+        saved = Progress;
         if (!settings.Save())
             tray.ShowBalloonTip(2500, "DesctopNewYear", "Не удалось сохранить состояние двора.", ToolTipIcon.Warning);
     }
