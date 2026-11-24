@@ -1,12 +1,14 @@
 namespace DesctopNewYear;
 
-internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp }
+internal enum Pose { Rest, Walk, Hang, Shovel, Fly, React, Tractor, Throw, PickUp, RollableSnow }
 
 internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int Direction, int Toy, float Time,
-    bool NoHat = false, bool HoldingHat = false, bool Plowing = false, bool RecoveredToy = false)
+    bool NoHat = false, bool HoldingHat = false, bool Plowing = false, bool RecoveredToy = false, float Snowball = 0)
 {
-    public int ArtWidth => Pose == Pose.Tractor ? 214 : Owl ? 108 : 128;
-    public int ArtHeight => Pose == Pose.Tractor ? 122 : Owl ? 99 : 139;
+    public int ArtWidth => Pose == Pose.RollableSnow ? (int)MathF.Ceiling(Snowball * 2 + 8) :
+        Pose == Pose.Tractor ? 214 : Owl ? 108 : 128;
+    public int ArtHeight => Pose == Pose.RollableSnow ? ArtWidth :
+        Pose == Pose.Tractor ? 122 : Owl ? 99 : 139;
     public float WalkStep => Pose == Pose.Walk ? MathF.Sin(Time * 14) : 0;
     public float Bob => Math.Abs(WalkStep) * 2.5f;
 
@@ -23,7 +25,9 @@ internal readonly record struct ActorFrame(PointF Feet, bool Owl, Pose Pose, int
 
     public void Paint(Graphics graphics)
     {
-        if (Owl)
+        if (Pose == Pose.RollableSnow)
+            YardArt.DrawSnowball(graphics, Snowball, new(0, -Snowball));
+        else if (Owl)
             YardArt.Owl(graphics, this);
         else
         {
@@ -43,9 +47,15 @@ internal sealed class YardScene
     private enum SnowmanAction
     {
         Rest, WalkAround, Inspect, Leave, Away, Carry, Hang, Return, ToPath, Clean,
-        FetchTractor, TractorAway, Plow, DriveOut, FindHat, PickHat, FindToy, PickToy
+        FetchTractor, TractorAway, Plow, DriveOut, FindHat, PickHat, FindToy, PickToy,
+        ShapeBase, GoForHead, ShapeHead, CarryHead, StackHead
     }
-    private enum OwlAction { Roam, Steal, DiscardToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow }
+    private enum OwlAction
+    {
+        Roam, Steal, DiscardToy, ShakeBranch, Leave, TakeHat, DropHat, AtWindow, LeaveWindow,
+        FetchMiniHat, DeliverMiniHat
+    }
+    private enum MiniStage { Empty, Shaping, Loose, Parked }
     private enum Chore { Walk, Tree, Lantern }
 
     private readonly YardSettings settings;
@@ -79,6 +89,11 @@ internal sealed class YardScene
     private bool settled, askedToClean, mouseDown, owlDragged, swayUsed;
     private Point dragStart;
     private PointF dragOffset;
+    private MiniStage miniStage;
+    private bool askedForMini, miniGrabbed;
+    private float miniRadius;
+    private PointF miniBall, miniDragOffset;
+    private double nextMiniHat = 8;
 
     public YardLayout Layout { get; private set; }
     public bool Snowing => snowfall > 0;
@@ -92,7 +107,7 @@ internal sealed class YardScene
          owlAction == OwlAction.LeaveWindow && visibleDeparture && owlFlight > 0 && owlTime < .65f);
     public bool InMotion => snowmanAction is not (SnowmanAction.Rest or SnowmanAction.Away) ||
         snowmanReaction > 0 || owlFlight > 0 || owlReaction > 0 || mouseDown || hatGrabbed || CurrentPerch.HasValue ||
-        Snowing || Smoking || PowderFalling;
+        Snowing || Smoking || PowderFalling || miniGrabbed;
 
     public YardScene(YardSettings settings, YardLayout layout, Random? random = null)
     {
@@ -108,6 +123,15 @@ internal sealed class YardScene
     public void SetLayout(YardLayout layout)
     {
         Layout = layout;
+        miniGrabbed = false;
+        if (miniStage == MiniStage.Shaping)
+        {
+            miniStage = MiniStage.Loose;
+            miniRadius = 16;
+        }
+        miniBall = miniStage == MiniStage.Parked ? layout.MiniStand : layout.Home;
+        if (BuildingMiniature)
+            SetSnowman(SnowmanAction.Return);
         snowman = snowmanAction is SnowmanAction.Away or SnowmanAction.Carry or
             SnowmanAction.TractorAway or SnowmanAction.Plow ? Offscreen : layout.Home;
         if (snowmanAction == SnowmanAction.Hang)
@@ -151,6 +175,8 @@ internal sealed class YardScene
                 SnowmanAction.FindHat or SnowmanAction.FindToy when throwPose > 0 => Pose.Throw,
                 SnowmanAction.FindToy when owlHasToy => Pose.Rest,
                 SnowmanAction.PickHat or SnowmanAction.PickToy => Pose.PickUp,
+                SnowmanAction.ShapeBase or SnowmanAction.ShapeHead => Pose.PickUp,
+                SnowmanAction.StackHead => Pose.Hang,
                 _ when owlAction == OwlAction.Steal && owlFlight > 0 => Pose.Rest,
                 _ when snowmanReaction > 0 => Pose.React,
                 SnowmanAction.Clean => powder > .5f ? Pose.Rest : Pose.Shovel,
@@ -161,13 +187,23 @@ internal sealed class YardScene
             };
             return new(snowman, false, pose, direction, held,
                 pose is Pose.Walk or Pose.Shovel or Pose.Tractor ? AnimationTime : 0,
-                NoHat: hatMissing, Plowing: snowmanAction == SnowmanAction.Plow, RecoveredToy: returningToy);
+                NoHat: hatMissing, Plowing: snowmanAction == SnowmanAction.Plow, RecoveredToy: returningToy,
+                Snowball: snowmanAction is SnowmanAction.CarryHead or SnowmanAction.StackHead ? MiniHeadRadius : 0);
         }
     }
 
     public ActorFrame? Owl => owlAway ? null : new(owl, true, owlFlight > 0 && !mouseDown ? Pose.Fly :
         owlReaction > 0 || mouseDown ? Pose.React : Pose.Rest, owlLook, owlHasToy ? stolen : -1,
-        owlFlight > 0 && !mouseDown ? AnimationTime : 0, HoldingHat: owlHasHat);
+        owlFlight > 0 && !mouseDown ? AnimationTime : 0, HoldingHat: owlHasHat || owlAction == OwlAction.DeliverMiniHat);
+
+    public ActorFrame? LooseSnowball => miniStage == MiniStage.Empty ? null :
+        new ActorFrame(miniBall, false, Pose.RollableSnow, 1, -1, 0,
+            Snowball: miniStage == MiniStage.Shaping ? 5 + 11 * Math.Clamp(snowmanTime / 1.2f, 0, 1) : miniRadius);
+    public ActorFrame? RollableBall => miniStage == MiniStage.Loose ? LooseSnowball : null;
+    public PointF? MiniatureTarget => miniStage == MiniStage.Loose ? Layout.MiniStand : null;
+    private float MiniHeadRadius => miniRadius * .62f;
+    private bool BuildingMiniature => snowmanAction is SnowmanAction.ShapeBase or SnowmanAction.GoForHead or
+        SnowmanAction.ShapeHead or SnowmanAction.CarryHead or SnowmanAction.StackHead;
 
     private float AnimationTime => (float)(time % (2 * Math.PI));
     private PointF Offscreen => new(Layout.View.Right + 113 * Layout.Scale, Layout.Home.Y);
@@ -244,9 +280,66 @@ internal sealed class YardScene
             StartWalk();
     }
 
+    public void ClickSnowman()
+    {
+        if (settings.MiniSnowmanSize == 0 && miniStage == MiniStage.Empty)
+        {
+            askedForMini = true;
+            if (SnowmanFree)
+                return;
+        }
+        GreetSnowman();
+    }
+
+    public bool TryGrabSnowball(Point cursor)
+    {
+        if (miniGrabbed || miniStage != MiniStage.Loose)
+            return false;
+
+        var radius = miniRadius * Layout.Scale;
+        var center = new PointF(miniBall.X, miniBall.Y - radius);
+        if (Distance(center, cursor) > radius + 4)
+            return false;
+
+        miniGrabbed = true;
+        miniDragOffset = new(miniBall.X - cursor.X, miniBall.Y - cursor.Y);
+        return true;
+    }
+
+    public void RollSnowball(Point cursor)
+    {
+        if (!miniGrabbed)
+            return;
+
+        var work = Layout.Work;
+        var scale = Layout.Scale;
+        var next = new PointF(
+            Math.Clamp(cursor.X + miniDragOffset.X, work.Left + 32 * scale, work.Right - 32 * scale),
+            Math.Clamp(cursor.Y + miniDragOffset.Y, Layout.Home.Y - 84 * scale, work.Bottom - 14 * scale));
+        miniRadius = Math.Min(30, miniRadius + Distance(miniBall, next) / (38 * scale));
+        miniBall = next;
+    }
+
+    public void DropSnowball(Point cursor)
+    {
+        if (!miniGrabbed)
+            return;
+
+        RollSnowball(cursor);
+        miniGrabbed = false;
+        if (Distance(miniBall, Layout.MiniStand) > 112 * Layout.Scale)
+            return;
+
+        miniBall = Layout.MiniStand;
+        miniRadius = Math.Max(22, miniRadius);
+        miniStage = MiniStage.Parked;
+    }
+
+    public void CancelSnowballDrag() => miniGrabbed = false;
+
     public bool TryGrabHat(Point cursor)
     {
-        if (hatMissing || hatGrabbed || owlAction is OwlAction.TakeHat or OwlAction.Steal ||
+        if (hatMissing || hatGrabbed || BuildingMiniature || owlAction is OwlAction.TakeHat or OwlAction.Steal ||
             stolen >= 0 && !returningToy ||
             Snowman is not { Pose: not Pose.Tractor } actor)
             return false;
@@ -433,6 +526,13 @@ internal sealed class YardScene
             snowmanReaction = 0;
             SetSnowman(SnowmanAction.ToPath);
         }
+        else if (SnowmanFree && miniStage == MiniStage.Parked)
+        {
+            snowmanReaction = 0;
+            SetSnowman(SnowmanAction.GoForHead);
+        }
+        else if (SnowmanFree && askedForMini && miniStage == MiniStage.Empty)
+            ShapeSnowball();
 
         if (snowmanReaction > 0)
             return;
@@ -523,7 +623,42 @@ internal sealed class YardScene
                 returningToy = true;
                 SetSnowman(SnowmanAction.Carry);
                 break;
+            case SnowmanAction.ShapeBase when snowmanTime >= 1.2f:
+                miniStage = MiniStage.Loose;
+                miniRadius = 16;
+                SetSnowman(SnowmanAction.Return);
+                break;
+            case SnowmanAction.GoForHead when WalkTo(Layout.Path, seconds, 136):
+                SetSnowman(SnowmanAction.ShapeHead);
+                break;
+            case SnowmanAction.ShapeHead when snowmanTime >= 1.2f:
+                SetSnowman(SnowmanAction.CarryHead);
+                break;
+            case SnowmanAction.CarryHead when WalkTo(Layout.MiniStand with
+                { X = Layout.MiniStand.X + 53 * Layout.Scale }, seconds, 132):
+                direction = -1;
+                SetSnowman(SnowmanAction.StackHead);
+                break;
+            case SnowmanAction.StackHead when snowmanTime >= 1.6f:
+                settings.MiniSnowmanSize = (int)MathF.Round(miniRadius);
+                settings.MiniSnowmanHat = false;
+                nextMiniHat = time + 6;
+                miniStage = MiniStage.Empty;
+                SetSnowman(SnowmanAction.Return);
+                break;
         }
+    }
+
+    private void ShapeSnowball()
+    {
+        askedForMini = false;
+        snowmanReaction = 0;
+        direction = -1;
+        var scale = Layout.Scale;
+        miniBall = new(Math.Clamp(snowman.X - 48 * scale, Layout.Work.Left + 34 * scale,
+            Layout.Work.Right - 34 * scale), snowman.Y);
+        miniStage = MiniStage.Shaping;
+        SetSnowman(SnowmanAction.ShapeBase);
     }
 
     private bool SnowmanFree => snowmanAction is SnowmanAction.Rest or SnowmanAction.Return or
@@ -666,7 +801,16 @@ internal sealed class YardScene
             {
                 owlAway = false;
                 owl = RightEdge;
-                FlyTo(Layout.Roof, OwlAction.Roam);
+                if (owlAction == OwlAction.FetchMiniHat)
+                {
+                    var stand = Layout.MiniStand;
+                    var size = settings.MiniSnowmanSize;
+                    var height = 2 * size + size * .62f * 1.46f;
+                    FlyTo(new(stand.X - 8 * Layout.Scale, stand.Y - (height - 29) * Layout.Scale),
+                        OwlAction.DeliverMiniHat, speed: 238, maxDuration: 7.5f);
+                }
+                else
+                    FlyTo(Layout.Roof, OwlAction.Roam);
             }
             return;
         }
@@ -691,6 +835,14 @@ internal sealed class YardScene
         {
             if (time >= nextOwl)
                 DismissWindowPerch(showDeparture: true);
+            return;
+        }
+
+        if (settings.MiniSnowmanSize > 0 && !settings.MiniSnowmanHat && time >= nextMiniHat &&
+            !hatMissing && stolen < 0)
+        {
+            nextMiniHat = time + 12;
+            FlyTo(RightEdge, OwlAction.FetchMiniHat);
             return;
         }
 
@@ -769,6 +921,14 @@ internal sealed class YardScene
                 break;
             case OwlAction.DiscardToy:
                 DiscardOrnament();
+                break;
+            case OwlAction.FetchMiniHat:
+                owlAway = true;
+                nextOwl = time + random.Next(4, 7);
+                break;
+            case OwlAction.DeliverMiniHat:
+                settings.MiniSnowmanHat = true;
+                FlyTo(Layout.Roof, OwlAction.Roam);
                 break;
             case OwlAction.Leave:
                 owlAway = true;

@@ -15,6 +15,8 @@ internal sealed class YardSettings
     public int Ornaments { get; set; }
     public int MissingOrnament { get; set; } = -1;
     public int Snow { get; set; }
+    public int MiniSnowmanSize { get; set; }
+    public bool MiniSnowmanHat { get; set; }
 
     public static YardSettings Load()
     {
@@ -28,6 +30,11 @@ internal sealed class YardSettings
             if (settings.MissingOrnament < 0 || settings.MissingOrnament >= Math.Min(settings.Ornaments, 6))
                 settings.MissingOrnament = -1;
             settings.Snow = Math.Clamp(settings.Snow, 0, 3);
+            if (settings.MiniSnowmanSize is < 22 or > 30)
+            {
+                settings.MiniSnowmanSize = 0;
+                settings.MiniSnowmanHat = false;
+            }
             return settings;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)

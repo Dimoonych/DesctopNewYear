@@ -24,14 +24,14 @@ internal sealed class SpriteWindow : NativeWindow, IDisposable
 
     public bool Available => Handle != 0 && Native.IsWindow(Handle);
 
-    public SpriteWindow(bool owl, nint desktop)
+    public SpriteWindow(bool owl, nint desktop, string? caption = null)
     {
         this.owl = owl;
         this.desktop = desktop;
         CreateHandle(new CreateParams
         {
-            Caption = desktop == 0 ? "DesctopNewYear — сова на окне" :
-                owl ? "DesctopNewYear — сова" : "DesctopNewYear — снеговик",
+            Caption = caption ?? (desktop == 0 ? "DesctopNewYear — сова на окне" :
+                owl ? "DesctopNewYear — сова" : "DesctopNewYear — снеговик"),
             Style = Native.Popup,
             ExStyle = Native.Layered | Native.NoActivate | Native.ToolWindow |
                 (desktop == 0 ? Native.Transparent : 0)

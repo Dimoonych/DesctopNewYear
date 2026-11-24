@@ -6,6 +6,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DesctopNewYear</AssemblyName>
-    <Version>0.5.1</Version>
+    <Version>0.6.0</Version>
   </PropertyGroup>
 </Project>

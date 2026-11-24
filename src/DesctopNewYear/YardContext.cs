@@ -18,13 +18,13 @@ internal sealed class YardContext : ApplicationContext
     private readonly ExitShortcut exitShortcut;
     private readonly YardScene scene;
     private WallpaperWindow? wallpaper;
-    private SpriteWindow? snowman, owl, visitingOwl;
+    private SpriteWindow? snowman, owl, visitingOwl, snowball;
     private WindowPerch? perchCandidate;
     private double lastFrame, nextProbe, nextAttach;
     private bool fullscreen, paused, disposed;
-    private (int Ornaments, int Snow, int MissingOrnament) saved;
-    private (int Ornaments, int Snow, int MissingOrnament) Progress =>
-        (settings.Ornaments, settings.Snow, settings.MissingOrnament);
+    private (int Ornaments, int Snow, int MissingOrnament, int MiniSize, bool MiniHat) saved;
+    private (int Ornaments, int Snow, int MissingOrnament, int MiniSize, bool MiniHat) Progress =>
+        (settings.Ornaments, settings.Snow, settings.MissingOrnament, settings.MiniSnowmanSize, settings.MiniSnowmanHat);
 
     public YardContext()
     {
@@ -51,10 +51,12 @@ internal sealed class YardContext : ApplicationContext
     private void ConfigureMenu()
     {
         var exit = Item("Выйти", ExitThread);
+        var buildMiniature = Item("Слепить снеговичка", () => Run(scene.ClickSnowman));
         exit.ShortcutKeyDisplayString = exitShortcut.Registered ? ExitShortcut.Display : "";
         exit.ToolTipText = exitShortcut.Registered ? "" : "Горячая клавиша занята другим приложением.";
         menu.Items.AddRange([
             status, new ToolStripSeparator(),
+            buildMiniature,
             Item("Позвать снеговика на прогулку", () => Run(scene.StartWalk)),
             Item("Сходить за игрушкой", () => Run(scene.StartToy)),
             Item("Сова, верни игрушку!", () => Run(scene.AskForToyTheft)),
@@ -83,6 +85,8 @@ internal sealed class YardContext : ApplicationContext
         {
             pause.Checked = paused;
             wallpaperOnly.Checked = settings.WallpaperOnly;
+            buildMiniature.Enabled = !settings.WallpaperOnly && settings.MiniSnowmanSize == 0 &&
+                scene.LooseSnowball is null;
             status.Text = wallpaper is not { Available: true } ? "Фон пока не подключён" :
                 fullscreen ? "Полноэкранный режим" : "Новогодний двор";
             RefreshMonitors();
@@ -175,7 +179,8 @@ internal sealed class YardContext : ApplicationContext
 
         if (elapsed >= nextAttach &&
             (wallpaper is not { Available: true } || snowman is not { Available: true } ||
-             owl is not { Available: true } || visitingOwl is not { Available: true }))
+             owl is not { Available: true } || visitingOwl is not { Available: true } ||
+             snowball is not { Available: true }))
         {
             nextAttach = elapsed + 12;
             AttachDesktop();
@@ -184,6 +189,7 @@ internal sealed class YardContext : ApplicationContext
         var now = DateTime.Now;
         snowman?.UpdateDrag();
         owl?.UpdateDrag();
+        snowball?.UpdateDrag();
         if (!paused && !fullscreen)
             scene.Advance(seconds, Daylight.At(now, settings), now, PickPerch());
         Render(now);
@@ -227,7 +233,8 @@ internal sealed class YardContext : ApplicationContext
             snowman = new SpriteWindow(owl: false, wallpaper.IconHost);
             owl = new SpriteWindow(owl: true, wallpaper.IconHost);
             visitingOwl = new SpriteWindow(owl: true, desktop: 0);
-            snowman.Clicked += _ => Run(scene.GreetSnowman);
+            snowball = new SpriteWindow(owl: false, wallpaper.IconHost, "DesctopNewYear — снежный ком");
+            snowman.Clicked += _ => Run(scene.ClickSnowman);
             snowman.BeginDrag += cursor =>
             {
                 if (!scene.TryGrabHat(cursor))
@@ -246,6 +253,16 @@ internal sealed class YardContext : ApplicationContext
             owl.Dragged += scene.DragOwl;
             owl.Dropped += _ => scene.DropOwl();
             owl.CaptureLost += scene.CancelDrag;
+            snowball.BeginDrag += cursor =>
+            {
+                if (!scene.TryGrabSnowball(cursor))
+                    return false;
+                Tick();
+                return true;
+            };
+            snowball.Dragged += scene.RollSnowball;
+            snowball.Dropped += scene.DropSnowball;
+            snowball.CaptureLost += scene.CancelSnowballDrag;
         }
         catch (Win32Exception)
         {
@@ -271,6 +288,7 @@ internal sealed class YardContext : ApplicationContext
             snowman?.Draw(interactive && !fullscreen ? snowmanFrame : null, layout.Scale, layout.View);
             owl?.Draw(interactive && !fullscreen && !isVisiting ? owlFrame : null, layout.Scale, layout.View);
             visitingOwl?.Draw(isVisiting ? owlFrame : null, layout.Scale, layout.View);
+            snowball?.Draw(interactive && !fullscreen ? scene.RollableBall : null, layout.Scale, layout.View);
         }
         catch (Win32Exception)
         {
@@ -286,7 +304,8 @@ internal sealed class YardContext : ApplicationContext
         owl?.Dispose();
         snowman?.Dispose();
         visitingOwl?.Dispose();
-        owl = snowman = visitingOwl = null;
+        snowball?.Dispose();
+        owl = snowman = visitingOwl = snowball = null;
     }
 
     private void ReleaseDesktop()

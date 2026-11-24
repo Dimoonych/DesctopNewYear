@@ -22,6 +22,9 @@ internal readonly record struct YardLayout(Rectangle View, Rectangle Work)
     public PointF Lantern => Screen(-465, -106);
     public PointF Branch => Screen(-393, -112);
     public Rectangle SnowArea => new(Point.Empty, View.Size);
+    public PointF PondBench => new(View.Width * .265f + Math.Min(View.Width * .163f, 285 * Scale) * .75f,
+        Anchor.Y + 18 * Scale);
+    public PointF MiniStand => new(View.X + PondBench.X + 73 * Scale, View.Y + PondBench.Y + 9 * Scale);
 }
 
 internal static class YardArt
@@ -40,7 +43,8 @@ internal static class YardArt
     public static PointF OrnamentPosition(YardLayout layout, int index) =>
         layout.Screen(-393 + Branches[index].X, Branches[index].Y);
 
-    public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int snow, int missing = -1)
+    public static Bitmap Landscape(YardLayout layout, Daylight light, int ornaments, int snow, int missing = -1,
+        int miniature = 0, bool miniHat = false)
     {
         var bitmap = new Bitmap(layout.View.Width, layout.View.Height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(bitmap);
@@ -59,6 +63,14 @@ internal static class YardArt
         DrawForest(graphics, w, h, layout.Scale, dark);
         DrawGround(graphics, w, h, dark);
         DrawMeadow(graphics, layout, dark);
+        if (miniature > 0)
+        {
+            var saved = graphics.Save();
+            graphics.TranslateTransform(layout.MiniStand.X - layout.View.X, layout.MiniStand.Y - layout.View.Y);
+            graphics.ScaleTransform(layout.Scale, layout.Scale);
+            DrawMiniSnowman(graphics, miniature, miniHat);
+            graphics.Restore(saved);
+        }
 
         graphics.TranslateTransform(layout.Anchor.X, layout.Anchor.Y);
         graphics.ScaleTransform(layout.Scale, layout.Scale);
@@ -217,7 +229,7 @@ internal static class YardArt
         DrawMeadowSpruce(g, w * .093f, h * .809f, 107 * scale, 33 * scale, dark);
         DrawMeadowSpruce(g, w * .43f, h * .746f, 96 * scale, 31 * scale, dark);
         DrawMeadowSpruce(g, w * .46f, h * .773f, 130 * scale, 40 * scale, dark);
-        DrawBench(g, new(center.X + halfWidth * .75f, pathY - 16 * scale), scale, iceEdge, dark);
+        DrawBench(g, layout.PondBench, scale, iceEdge, dark);
     }
 
     private static void DrawMeadowSpruce(Graphics g, float x, float y, float height, float half, float dark)
@@ -453,6 +465,9 @@ internal static class YardArt
                 Ornament(g, held, actor.Toy, 1.35f);
         }
 
+        if (actor.Snowball > 0)
+            DrawSnowball(g, actor.Snowball, new(30, actor.Pose == Pose.Hang ? -88 : -56));
+
         if (actor.Pose != Pose.Shovel)
             return;
 
@@ -462,6 +477,44 @@ internal static class YardArt
         Poly(g, C("#7194ab"), new(endX - 7, endY - 4), new(endX + 8, endY - 6),
             new(endX + 13, endY + 7), new(endX - 4, endY + 12));
         Line(g, C("#e3edf1"), 2, endX - 3, endY + 10, endX + 12, endY + 6);
+    }
+
+    public static void DrawSnowball(Graphics g, float radius, PointF center)
+    {
+        Ellipse(g, C("#9fbed1"), center.X - radius, center.Y - radius, radius * 2, radius * 2);
+        Ellipse(g, C("#e6f2f5"), center.X - radius * .96f, center.Y - radius,
+            radius * 1.80f, radius * 1.79f);
+        Ellipse(g, Color.FromArgb(146, Color.White), center.X - radius * .57f, center.Y - radius * .60f,
+            radius * .55f, radius * .31f);
+        Ellipse(g, Color.FromArgb(105, C("#a1bece")), center.X + radius * .31f, center.Y + radius * .29f,
+            radius * .20f, radius * .14f);
+    }
+
+    private static void DrawMiniSnowman(Graphics g, float body, bool hat)
+    {
+        var head = body * .62f;
+        var face = -2 * body - head * .64f;
+        var coal = C("#43536b");
+        Ellipse(g, Color.FromArgb(91, coal), -body * 1.25f, -5, body * 2.5f, 11);
+        DrawSnowball(g, body, new(0, -body));
+        DrawSnowball(g, head, new(0, face));
+        Ellipse(g, C("#80a2aa"), -head * .80f, face + head * .61f, head * 1.64f, head * .30f);
+        Poly(g, C("#80a2aa"), new(-head * .49f, face + head * .73f),
+            new(-head * .09f, face + head * .77f), new(-head * .43f, face + head * 1.38f),
+            new(-head * .67f, face + head * 1.28f));
+        Ellipse(g, coal, -head * .36f, face - head * .29f, head * .16f, head * .19f);
+        Ellipse(g, coal, head * .22f, face - head * .29f, head * .16f, head * .19f);
+        using (var smile = new Pen(coal, Math.Max(1, head * .075f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            g.DrawArc(smile, -head * .31f, face - head * .03f, head * .62f, head * .47f, 15, 150);
+        Ellipse(g, coal, -body * .06f, -body * 1.06f, body * .15f, body * .15f);
+        if (hat)
+            Hat(g, new(0, face - head * .77f), .46f + body / 220f, -7);
+    }
+
+    public static void DrawSnowballTarget(Graphics g, PointF feet, float scale)
+    {
+        using var rim = new Pen(Color.FromArgb(125, C("#dbefee")), 1.6f * scale) { DashStyle = DashStyle.Dot };
+        g.DrawEllipse(rim, feet.X - 39 * scale, feet.Y - 17 * scale, 78 * scale, 28 * scale);
     }
 
     public static void Hat(Graphics g, PointF position, float scale, float angle)
