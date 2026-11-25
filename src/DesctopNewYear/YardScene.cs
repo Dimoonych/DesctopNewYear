@@ -73,7 +73,8 @@ internal sealed class YardScene
     private float snowmanTime, owlTime, owlFlight, snowmanReaction, owlReaction;
     private double nextToy = 8, nextWalk = 5, nextOwl = 12, nextSnow = 16, nextSmoke = 8, nextHatTheft = 55;
     private double nextShot;
-    private double nextToyTheft = 14;
+    private double nextToyTheft = 110;
+    private int decorationsAtLastTheft;
     private bool askedForToy, askedForWalk, askedForTractor, askedForHat, owlAway;
     private bool askedForToyTheft, owlHasToy, returningToy, threwAtToy;
     private int plannedToy;
@@ -135,6 +136,7 @@ internal sealed class YardScene
         this.settings = settings;
         this.random = random ?? Random.Shared;
         winterVisit = new(settings, Random.Shared);
+        decorationsAtLastTheft = DecorationCount;
         Layout = layout;
         snowman = layout.Home;
         owl = layout.Roof;
@@ -642,7 +644,7 @@ internal sealed class YardScene
                     stolen = -1;
                     settings.MissingOrnament = -1;
                     returningToy = false;
-                    nextToyTheft = time + random.Next(24, 39);
+                    nextToyTheft = time + random.Next(130, 181);
                 }
                 else if (decorationTree >= 0)
                     settings.PondOrnaments++;
@@ -982,9 +984,14 @@ internal sealed class YardScene
             return;
         }
         var canStealToy = canStealHat && settings.Ornaments > 0 && settings.MissingOrnament < 0;
-        if (canStealToy && (askedForToyTheft || time >= nextToyTheft))
+        var readyForAutomaticTheft = !askedForToy && time >= nextToyTheft &&
+            (DecorationCount > decorationsAtLastTheft ||
+             settings.Ornaments == 7 && settings.PondOrnaments == YardLayout.PondTreeCount * 3);
+        if (canStealToy && (askedForToyTheft || readyForAutomaticTheft))
         {
             askedForToyTheft = false;
+            decorationsAtLastTheft = DecorationCount;
+            nextToyTheft = time + 130;
             plannedToy = random.Next(Math.Min(6, settings.Ornaments));
             var branch = YardArt.OrnamentPosition(Layout, plannedToy);
             FlyTo(new(branch.X - 8 * Layout.Scale, branch.Y + 29 * Layout.Scale), OwlAction.Steal);
@@ -1003,6 +1010,8 @@ internal sealed class YardScene
             FlyTo(choices[random.Next(choices.Length)], OwlAction.Roam);
         }
     }
+
+    private int DecorationCount => settings.Ornaments + settings.PondOrnaments;
 
     private void LandOnWindow(WindowPerch perch)
     {
